@@ -15,6 +15,7 @@ import { InvestigationWorkspacePage } from "./pages/InvestigationWorkspace";
 import { CausalGraphPage } from "./pages/CausalGraph";
 import { HypothesisAnalysisPage } from "./pages/HypothesisAnalysis";
 import { EvaluationDashboardPage } from "./pages/EvaluationDashboard";
+import { LiveInvestigationPage } from "./pages/LiveInvestigation";
 import { ErrorPlaceholder } from "./components/Layout";
 
 /* -------------------------------------------------------
@@ -51,6 +52,11 @@ const routes: RouteObject[] = [
     path: "/evaluation",
     element: <EvaluationDashboardPage />,
     errorElement: <ErrorPlaceholder message="Evaluation dashboard not found." />,
+  },
+  {
+    path: "/investigation",
+    element: <LiveInvestigationPage />,
+    errorElement: <ErrorPlaceholder message="Live investigation not found." />,
   },
   /* -------------------------------------------------------
      Catch-all 404
