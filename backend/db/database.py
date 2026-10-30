@@ -2,7 +2,8 @@
 
 The backend owns all persistence. Domain payloads remain outside SQLite until the
 investigation workflow is implemented; the current schema stores investigation
-metadata and mock progress only. SQLite is accessed through the standard library.
+metadata, mock progress, and queued run configuration. SQLite is accessed through
+the standard library.
 """
 
 import sqlite3
@@ -31,6 +32,28 @@ CREATE INDEX IF NOT EXISTS idx_investigations_status
 
 CREATE INDEX IF NOT EXISTS idx_investigations_created_at
     ON investigations (created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    scenario_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    title TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    fault_config_json TEXT,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    queued_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_runs_scenario_id
+    ON runs (scenario_id);
+
+CREATE INDEX IF NOT EXISTS idx_runs_status
+    ON runs (status);
 """
 
 _COLUMN_MIGRATIONS: dict[str, str] = {

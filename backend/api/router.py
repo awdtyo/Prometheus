@@ -7,17 +7,19 @@ development but are hidden from the OpenAPI document. New clients should use
 
 from fastapi import APIRouter
 
-from backend.api.routes import catalog, health, investigations
+from backend.api.routes import catalog, health, investigations, runs
 
 api_router = APIRouter()
 
 api_router.include_router(health.router)
 api_router.include_router(investigations.router, include_in_schema=False)
 api_router.include_router(catalog.router, include_in_schema=False)
+api_router.include_router(runs.router, include_in_schema=False)
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(health.router)
 v1_router.include_router(investigations.router)
 v1_router.include_router(catalog.router)
+v1_router.include_router(runs.router)
 
 api_router.include_router(v1_router)

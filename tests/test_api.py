@@ -36,6 +36,9 @@ def test_openapi_includes_versioned_routes(client: TestClient) -> None:
     assert "/api/v1/investigations/{investigation_id}/timeline" in paths
     assert "/api/v1/investigations/{investigation_id}/events" in paths
     assert "/api/v1/scenarios" in paths
+    assert "/api/v1/scenarios/{scenario_id}" in paths
+    assert "/api/v1/scenarios/{scenario_id}/inject" in paths
+    assert "/api/v1/runs" in paths
     assert "/api/v1/subsystems" in paths
 
 

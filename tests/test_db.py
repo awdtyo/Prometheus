@@ -19,6 +19,7 @@ def test_init_db_creates_investigations_table(tmp_path: Path) -> None:
         }
 
     assert "investigations" in tables
+    assert "runs" in tables
 
 
 def test_init_db_is_idempotent_and_migrates_old_tables(tmp_path: Path) -> None:

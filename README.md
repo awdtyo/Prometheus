@@ -132,6 +132,13 @@ Try it with:
 ```bash
 curl http://127.0.0.1:8000/api/v1/health
 curl http://127.0.0.1:8000/api/v1/scenarios
+curl http://127.0.0.1:8000/api/v1/scenarios/scn_power_undervoltage
+curl -X POST http://127.0.0.1:8000/api/v1/scenarios/scn_power_undervoltage/inject \
+  -H "Content-Type: application/json" \
+  -d '{"fault_type":"power_loss","target_subsystem":"power","start_time":"2026-10-30T12:01:00Z","duration_seconds":120,"magnitude":40}'
+curl -X POST http://127.0.0.1:8000/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"scn_power_undervoltage"}'
 curl -X POST http://127.0.0.1:8000/api/v1/investigations \
   -H "Content-Type: application/json" \
   -d '{"scenario_id":"scn_power_undervoltage"}'
@@ -228,10 +235,13 @@ and planned request lifecycle.
   investigation configuration, with JSON round-trip tests.
 - FastAPI application factory, CORS, environment settings, structured logging,
   request IDs, centralized RFC 9457 errors, health endpoint, and OpenAPI docs.
-- Versioned `/api/v1` investigation and catalog routes backed by SQLite and a
-  deterministic mock service, including cursor pagination and SSE progress.
-- SQLite initialization with an `investigations` metadata table and idempotent
-  column migrations.
+- Versioned `/api/v1` investigation, scenario, subsystem, fault-injection, and
+  queued-run routes backed by SQLite and a deterministic mock service, including
+  cursor pagination and SSE progress.
+- Immutable scenario fixtures with telemetry, subsystem dependencies, and
+  scenario-specific fault validation; injection returns a preview only.
+- SQLite initialization with `investigations` and `runs` tables and idempotent
+  column migrations, plus an in-memory FIFO queue for run IDs.
 - React/Vite/TypeScript status shell with a typed health client and Vite proxy.
 - Pytest coverage for every implemented endpoint, an architecture import guard,
   Ruff config, and frontend lint/build scripts.
@@ -242,7 +252,7 @@ and planned request lifecycle.
 - Scenario simulation
 - Causal graph algorithms
 - Hypothesis-generation agents and ranking
-- Real investigation execution and persistence workflows
+- Real investigation execution, a background run worker, and result persistence
 - The investigation UI
 
 The backend's mock service is the integration point: replace it with an adapter

@@ -8,9 +8,10 @@
 
 - **Base path:** `/api`
 - **Current version:** `/api/v1`
-- **Legacy aliases:** `/api/health`, `/api/investigations`, `/api/scenarios`, and
-  `/api/subsystems` remain available for local development but are hidden from
-  the OpenAPI document.
+- **Legacy aliases:** `/api/health`, `/api/investigations`, `/api/scenarios`,
+  `/api/scenarios/{scenario_id}`, `/api/scenarios/{scenario_id}/inject`,
+  `/api/runs`, and `/api/subsystems` remain available for local development but
+  are hidden from the OpenAPI document.
 - **Media type:** `application/json; charset=utf-8`
 - **Field naming:** `snake_case`
 - **Timestamps:** UTC ISO 8601 with a `Z` suffix, for example
@@ -260,7 +261,9 @@ Headers include `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
 
 ### `GET /api/v1/scenarios`
 
-List scenarios that can start an investigation.
+List scenarios that can start an investigation. Scenario definitions are
+immutable backend fixtures: they describe mission inputs only, never a specific
+run configuration.
 
 ```json
 {
@@ -269,11 +272,137 @@ List scenarios that can start an investigation.
       "id": "scn_power_undervoltage",
       "name": "Power bus undervoltage",
       "description": "Battery heater fault causes a sustained bus undervoltage.",
-      "fault_types": ["power_degradation", "power_loss"]
+      "duration_seconds": 600.0,
+      "subsystem_ids": ["power", "thermal-control"],
+      "fault_types": [
+        "power_loss",
+        "power_degradation",
+        "thermal_overheat",
+        "sensor_drift",
+        "sensor_failure",
+        "software_fault"
+      ]
     }
   ]
 }
 ```
+
+### `GET /api/v1/scenarios/{scenario_id}`
+
+Return the complete scenario definition: mission window, subsystem metadata,
+telemetry channels, and valid fault options. Returns `404` when the scenario ID
+is unknown.
+
+**Response `200 OK`**
+
+```json
+{
+  "id": "scn_power_undervoltage",
+  "name": "Power bus undervoltage",
+  "description": "Battery heater fault causes a sustained bus undervoltage.",
+  "duration_seconds": 600.0,
+  "subsystem_ids": ["power", "thermal-control"],
+  "fault_types": ["power_loss", "power_degradation", "thermal_overheat"],
+  "mission_start_utc": "2026-10-30T12:00:00.000Z",
+  "subsystems": [
+    {
+      "id": "power",
+      "name": "Power",
+      "description": "Solar arrays, batteries, and the main power bus.",
+      "depends_on": ["thermal-control"]
+    }
+  ],
+  "telemetry_parameters": [
+    {
+      "parameter": "bus_voltage",
+      "subsystem": "power",
+      "unit": "V",
+      "nominal_value": 28.1,
+      "description": "Main power bus voltage."
+    }
+  ],
+  "fault_options": [
+    {
+      "fault_type": "power_loss",
+      "description": "Complete loss of power on the target subsystem.",
+      "target_subsystems": ["power"],
+      "min_duration_seconds": 1.0,
+      "max_duration_seconds": 600.0,
+      "min_magnitude": 0.0,
+      "max_magnitude": 100.0
+    }
+  ]
+}
+```
+
+### `POST /api/v1/scenarios/{scenario_id}/inject`
+
+Validate a fault against a scenario and return an injection preview. This route
+does not apply the fault or modify the scenario fixture; `preview` is always
+`true` and `applied` is always `false`. Invalid faults return `400`; an unknown
+scenario returns `404`; malformed bodies return `422`.
+
+**Request body** — `FaultConfig`
+
+| Field              | Type   | Required | Constraints                                            |
+| ------------------ | ------ | -------- | ------------------------------------------------------ |
+| `fault_type`       | enum   | yes      | Must be supported by the scenario                      |
+| `target_subsystem` | string | yes      | Lowercase kebab-case; must be a valid option target     |
+| `start_time`       | string | yes      | Aware UTC ISO 8601; fault must fit inside the mission   |
+| `duration_seconds` | number | yes      | Greater than `0`; within the option's allowed range     |
+| `magnitude`        | number | yes      | Non-negative; within the option's allowed range         |
+| `parameters`       | object | no       | Fault-specific parameters; defaults to `{}`             |
+
+Supported `fault_type` values are `power_loss`, `power_degradation`,
+`thermal_overheat`, `sensor_drift`, `sensor_failure`, `communication_loss`,
+`actuator_failure`, `software_fault`, and `unknown`. `unknown` is accepted by the
+wire enum but is never a supported scenario option, so it fails validation.
+
+```json
+{
+  "fault_type": "power_loss",
+  "target_subsystem": "power",
+  "start_time": "2026-10-30T12:01:00Z",
+  "duration_seconds": 120,
+  "magnitude": 40,
+  "parameters": {"bus": "main"}
+}
+```
+
+**Response `200 OK`**
+
+```json
+{
+  "injection_id": "inj_2a863db8a9ce4f61b1f6c8b7f0c1d2e3",
+  "scenario_id": "scn_power_undervoltage",
+  "preview": true,
+  "applied": false,
+  "fault_config": {
+    "fault_type": "power_loss",
+    "target_subsystem": "power",
+    "start_time": "2026-10-30T12:01:00.000Z",
+    "duration_seconds": 120.0,
+    "magnitude": 40.0,
+    "parameters": {"bus": "main"}
+  },
+  "effective_start_time": "2026-10-30T12:01:00.000Z",
+  "effective_end_time": "2026-10-30T12:03:00.000Z",
+  "scenario": {"id": "scn_power_undervoltage", "...": "full ScenarioDetailResponse"}
+}
+```
+
+`scenario` repeats the complete `GET /api/v1/scenarios/{scenario_id}` response;
+it is abbreviated above for readability.
+
+Injection-specific problem codes:
+
+| Status | `code`                    | Meaning                                      |
+| ------ | ------------------------- | -------------------------------------------- |
+| `400`  | `invalid_fault_type`      | Scenario does not support this fault type    |
+| `400`  | `invalid_fault_target`    | Target subsystem is not valid for this fault |
+| `400`  | `invalid_fault_duration`  | Duration is outside the option's range       |
+| `400`  | `invalid_fault_magnitude` | Magnitude is outside the option's range      |
+| `400`  | `fault_outside_scenario`  | Fault window is outside the mission window   |
 
 ### `GET /api/v1/subsystems`
 
@@ -292,10 +421,180 @@ List spacecraft subsystems and their direct dependencies.
 }
 ```
 
+## Runs
+
+### `POST /api/v1/runs`
+
+Create an investigation run from a scenario plus an investigation configuration,
+persist it as `queued`, enqueue it on the mock job queue, and return immediately
+with `202 Accepted`. Scenario definitions and run configurations stay separate.
+
+The canonical request nests all options under `investigation_config`. For
+convenience, `fault_config`, `agent_config`, and `scoring_config` may be supplied
+at the top level instead; mixing the nested and flat forms is rejected with
+`422`.
+
+**Request body**
+
+| Field                  | Type              | Required | Notes                                         |
+| ---------------------- | ----------------- | -------- | --------------------------------------------- |
+| `scenario_id`          | string            | yes      | 1–128 characters; must exist                  |
+| `investigation_config` | object            | no       | Canonical nested configuration                |
+| `fault_config`         | object \| null    | no       | Flat form; validated against the scenario      |
+| `agent_config`         | object \| null    | no       | Flat form                                     |
+| `scoring_config`       | object \| null    | no       | Flat form; evidence/consistency/coverage sum to 1 |
+| `title`                | string \| null    | no       | 1–512 characters; defaults from scenario name |
+| `metadata`             | object            | no       | Caller metadata; defaults to `{}`             |
+
+`investigation_config` fields:
+
+| Field            | Type           | Default | Notes                                      |
+| ---------------- | -------------- | ------- | ------------------------------------------ |
+| `fault_config`   | object \| null | none    | If omitted, the mock selects the scenario's first fault option |
+| `agent_config`   | object         | `{}`    | `enabled`, `max_hypotheses`, `temperature`, `model`, `seed`, `timeout_seconds`, `prompt_version` |
+| `scoring_config` | object         | `{}`    | Weights default to `0.4`/`0.35`/`0.25` and must sum to `1.0` |
+
+```json
+{
+  "scenario_id": "scn_power_undervoltage",
+  "title": "Power bus undervoltage",
+  "investigation_config": {
+    "fault_config": {
+      "fault_type": "power_loss",
+      "target_subsystem": "power",
+      "start_time": "2026-10-30T12:01:00Z",
+      "duration_seconds": 120,
+      "magnitude": 40
+    },
+    "agent_config": {"max_hypotheses": 3, "temperature": 0.0},
+    "scoring_config": {
+      "evidence_weight": 0.4,
+      "consistency_weight": 0.35,
+      "coverage_weight": 0.25
+    }
+  }
+}
+```
+
+**Response `202 Accepted`**
+
+```json
+{
+  "run_id": "run_08df4fd7d2834d92a9b87e9f7f1f2d3c",
+  "scenario_id": "scn_power_undervoltage",
+  "status": "queued",
+  "title": "Power bus undervoltage",
+  "investigation_config": {
+    "fault_config": {
+      "fault_type": "power_loss",
+      "target_subsystem": "power",
+      "start_time": "2026-10-30T12:01:00.000Z",
+      "duration_seconds": 120.0,
+      "magnitude": 40.0,
+      "parameters": {}
+    },
+    "agent_config": {
+      "enabled": true,
+      "max_hypotheses": 3,
+      "temperature": 0.0,
+      "model": null,
+      "seed": null,
+      "timeout_seconds": 60.0,
+      "prompt_version": null
+    },
+    "scoring_config": {
+      "evidence_weight": 0.4,
+      "consistency_weight": 0.35,
+      "coverage_weight": 0.25,
+      "contradiction_penalty": 0.2
+    }
+  },
+  "fault_config": {
+    "fault_type": "power_loss",
+    "target_subsystem": "power",
+    "start_time": "2026-10-30T12:01:00.000Z",
+    "duration_seconds": 120.0,
+    "magnitude": 40.0,
+    "parameters": {}
+  },
+  "queue_position": 1,
+  "created_at": "2026-10-30T15:00:00.000Z",
+  "queued_at": "2026-10-30T15:00:00.000Z",
+  "message": "Investigation queued."
+}
+```
+
+`status` values are `queued`, `running`, `completed`, `failed`, and `cancelled`;
+the mock returns `queued`. `fault_config` is repeated at the top level for
+convenience and is identical to the validated object nested under
+`investigation_config`.
+
+Validation behavior:
+
+- Unknown scenario → `404 not_found`.
+- Unsupported fault type, target, duration, magnitude, or mission window → `400`
+  with the same fault codes as `/inject`.
+- Malformed body, unknown fields, mixed nested/flat configuration, invalid
+  scoring weights, or invalid timestamps → `422 validation_error`.
+- No simulation or agent work runs synchronously; `status` is `queued`.
+
+## Curl examples
+
+```bash
+# Scenario detail
+curl http://127.0.0.1:8000/api/v1/scenarios/scn_power_undervoltage
+
+# Fault injection preview (does not mutate the scenario)
+curl -X POST \
+  http://127.0.0.1:8000/api/v1/scenarios/scn_power_undervoltage/inject \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fault_type": "power_loss",
+    "target_subsystem": "power",
+    "start_time": "2026-10-30T12:01:00Z",
+    "duration_seconds": 120,
+    "magnitude": 40
+  }'
+
+# Queue a run with the canonical nested configuration
+curl -X POST http://127.0.0.1:8000/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scenario_id": "scn_power_undervoltage",
+    "investigation_config": {
+      "fault_config": {
+        "fault_type": "power_loss",
+        "target_subsystem": "power",
+        "start_time": "2026-10-30T12:01:00Z",
+        "duration_seconds": 120,
+        "magnitude": 40
+      }
+    }
+  }'
+
+# Queue a run with the flat convenience form
+curl -X POST http://127.0.0.1:8000/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scenario_id": "scn_thermal_overheat",
+    "fault_config": {
+      "fault_type": "thermal_overheat",
+      "target_subsystem": "thermal-control",
+      "start_time": "2026-10-30T12:01:00Z",
+      "duration_seconds": 120,
+      "magnitude": 50
+    }
+  }'
+```
+
 ## Mock service behavior
 
-- The mock persists investigations in SQLite and generates hypotheses and
-  timeline events deterministically from the investigation ID.
+- The mock persists investigations and queued runs in SQLite and generates
+  hypotheses and timeline events deterministically from the investigation ID.
+- Scenario definitions are immutable in-process fixtures. Fault injection only
+  validates and previews; it never writes back to a scenario.
+- Runs are persisted with status `queued` and appended to an in-memory FIFO job
+  queue. No simulator, graph, agent, or worker logic executes yet.
 - It never imports simulator, graph, or agent code from `autopsy/`.
 - Set `MISSION_AUTOPSY_USE_MOCK_SERVICES=true` (the default) to use it. The
   service factory is the single switch point for a future `autopsy` adapter.

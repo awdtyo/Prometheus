@@ -20,15 +20,18 @@ backend/
 ├── version.py              # Works with or without the autopsy package
 ├── api/
 │   ├── router.py           # /api and versioned /api/v1 mounting
-│   └── routes/             # Thin handlers: health, investigations, catalog
+│   └── routes/             # Thin handlers: health, investigations, catalog, runs
+├── scenarios/              # Immutable scenario and subsystem fixtures
 ├── schemas/                # Pydantic request/response DTOs
 ├── services/
 │   ├── interfaces.py       # InvestigationService protocol
+│   ├── job_queue.py        # In-memory FIFO job queue contract
 │   ├── mock_service.py     # Deterministic mock implementation
 │   └── factory.py          # Single switch point for the real adapter
 └── db/
     ├── database.py         # SQLite connections, schema, migrations
-    └── investigations.py   # Investigation queries and keyset pagination
+    ├── investigations.py   # Investigation queries and keyset pagination
+    └── runs.py             # Queued run persistence
 ```
 
 Routes validate input and call one service method. Services orchestrate use cases
@@ -57,11 +60,20 @@ Useful URLs:
 | Docs | http://127.0.0.1:8000/docs |
 | OpenAPI | http://127.0.0.1:8000/openapi.json |
 | Scenarios | http://127.0.0.1:8000/api/v1/scenarios |
+| Scenario detail | http://127.0.0.1:8000/api/v1/scenarios/scn_power_undervoltage |
 | Investigations | http://127.0.0.1:8000/api/v1/investigations |
 
-Example:
+Examples:
 
 ```bash
+curl -X POST http://127.0.0.1:8000/api/v1/scenarios/scn_power_undervoltage/inject \
+  -H "Content-Type: application/json" \
+  -d '{"fault_type":"power_loss","target_subsystem":"power","start_time":"2026-10-30T12:01:00Z","duration_seconds":120,"magnitude":40}'
+
+curl -X POST http://127.0.0.1:8000/api/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"scn_power_undervoltage"}'
+
 curl -X POST http://127.0.0.1:8000/api/v1/investigations \
   -H "Content-Type: application/json" \
   -d '{"scenario_id":"scn_power_undervoltage"}'
@@ -79,6 +91,9 @@ curl -X POST http://127.0.0.1:8000/api/v1/investigations \
 | `GET` | `/api/v1/investigations/{id}/timeline` | Read the reconstructed timeline |
 | `GET` | `/api/v1/investigations/{id}/events` | Stream progress over SSE |
 | `GET` | `/api/v1/scenarios` | List scenarios |
+| `GET` | `/api/v1/scenarios/{id}` | Read scenario detail, telemetry, and fault options |
+| `POST` | `/api/v1/scenarios/{id}/inject` | Validate and preview a fault injection |
+| `POST` | `/api/v1/runs` | Validate, persist, and queue an investigation run |
 | `GET` | `/api/v1/subsystems` | List subsystems |
 
 Unversioned aliases under `/api` remain for local development but are hidden

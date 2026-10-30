@@ -49,6 +49,7 @@ the domain never knows the backend exists.
 | `autopsy/agents/`         | Competing hypothesis generation, provider adapters, structured output parsing                           | schemas, graph, provider SDKs                      | FastAPI, backend, SQLite                    |
 | `autopsy/analysis/`       | Evidence scoring, consistency checks, ranking, narrative assembly                                       | schemas, graph, simulation outputs                 | FastAPI, backend, SQLite                    |
 | `backend/api/`            | HTTP routing, request validation, response serialization                                                | FastAPI, schemas, dependencies, services           | SQL, autopsy internals, business logic      |
+| `backend/scenarios/`      | Immutable mock scenario, subsystem, telemetry, and fault-option fixtures                               | stdlib, backend.schemas.catalog                    | FastAPI, SQLite, autopsy                     |
 | `backend/services/`       | Use-case orchestration, transaction boundaries, domain/persistence translation                          | autopsy, backend.db, backend.schemas (only if needed) | FastAPI                                  |
 | `backend/db/`             | SQLite schema, connections, queries, migrations                                                         | stdlib `sqlite3`                                   | FastAPI, autopsy                            |
 | `backend/schemas/`        | HTTP request/response DTOs; wire contract                                                               | Pydantic                                           | autopsy (keeps wire contract decoupled)     |
@@ -113,6 +114,31 @@ The mock service also generates hypotheses and timeline data from the stored
 investigation and streams progress through server-sent events. It does not import
 simulator, graph, or agent code.
 
+### Current: preview a fault or queue a run with the mock service
+
+```text
+POST /api/v1/scenarios/{id}/inject
+  -> route validates FaultConfig
+  -> InvestigationService.inject_fault()
+       -> load immutable scenario fixture from backend.scenarios
+       -> validate fault type, target, duration, magnitude, and time window
+       -> return a preview; never mutate the scenario fixture
+  -> route returns ScenarioInjectionResponse
+
+POST /api/v1/runs
+  -> route validates RunCreate (nested or flat configuration)
+  -> InvestigationService.create_run()
+       -> load immutable scenario fixture
+       -> validate or synthesize the run's fault configuration
+       -> insert a queued run through backend.db.runs
+       -> enqueue the run ID in the in-memory FIFO job queue
+  -> route returns 202 Accepted with RunStatus.QUEUED
+```
+
+No simulation, graph, or agent work runs on either path. Scenario definitions
+and run configurations are separate objects; a run captures its validated fault
+configuration without changing the scenario catalog.
+
 ### Planned: create an investigation with the autopsy pipeline
 
 ```text
@@ -135,12 +161,17 @@ adapter is implemented.
 - SQLite file location comes from `MISSION_AUTOPSY_DATABASE_PATH`
   (default `./data/mission_autopsy.db`, resolved from the repository root).
 - `backend/db/database.py` owns the connection helper and idempotent schema.
-- The backend creates one table, `investigations`, with metadata and progress:
+- The backend creates an `investigations` table with metadata and progress:
   `id`, `scenario_id`, `title`, `description`, `fault_type`, `status`,
   `progress`, `current_stage`, `error_message`, `created_at`, `updated_at`,
   `completed_at`.
+- The backend creates a `runs` table with `run_id`, `scenario_id`, `status`,
+  `title`, serialized investigation and fault configuration, queue timestamps,
+  lifecycle timestamps, and `error_message`. No run read endpoint exists yet.
 - `backend/db/investigations.py` owns investigation queries, including opaque
-  keyset pagination cursors.
+  keyset pagination cursors. `backend/db/runs.py` owns queued-run persistence.
+- Run IDs are also held in the in-memory `InMemoryJobQueue` until a worker
+  drains them. This queue is process-local and intentionally non-durable.
 - Domain payloads (telemetry, graphs, hypotheses) are not stored yet. Their
   contracts are defined in `docs/data-contracts.md`; the mock generates
   hypotheses and timeline data deterministically from the investigation ID.
@@ -152,9 +183,10 @@ adapter is implemented.
 
 - Runtime secrets and deployment settings live in `.env` (ignored by git).
   `.env.example` contains placeholders only.
-- Subsystem and scenario definitions live in `configs/subsystems/` and
-  `configs/scenarios/` as YAML. They are empty until the subsystem and scenario
-  YAML contracts are added.
+- The mock backend's subsystem and scenario fixtures live in
+  `backend/scenarios/catalog.py` as immutable Python data. `configs/subsystems/`
+  and `configs/scenarios/` remain the planned YAML home for the real domain
+  loaders and are still empty.
 - Sample telemetry and event logs live in `fixtures/telemetry/` and
   `fixtures/events/`. They must be synthetic or cleared for public use.
 - The frontend reads the repository-root `.env` through Vite's `envDir`; only
@@ -177,7 +209,8 @@ API tests use a temporary SQLite database via the `client` fixture in
 
 - No telemetry parsing, simulation, graph construction, agent calls, or ranking.
 - No real investigation execution; the mock service is deterministic.
-- No authentication, authorization, or background job queue.
+- No authentication, authorization, durable worker, or external job queue. A
+  process-local FIFO queue only records pending mock run IDs.
 - No frontend investigation dashboard or data visualization.
 - No ORM or external database.
 - No deployment configuration (containers, CI, hosting).

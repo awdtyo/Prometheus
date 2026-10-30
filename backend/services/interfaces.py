@@ -3,7 +3,13 @@
 from collections.abc import Iterator
 from typing import Protocol
 
-from backend.schemas.catalog import ScenarioListResponse, SubsystemListResponse
+from backend.schemas.catalog import (
+    FaultConfig,
+    ScenarioDetailResponse,
+    ScenarioInjectionResponse,
+    ScenarioListResponse,
+    SubsystemListResponse,
+)
 from backend.schemas.investigation import (
     HypothesisListResponse,
     InvestigationCreate,
@@ -12,10 +18,11 @@ from backend.schemas.investigation import (
     ProgressEvent,
     TimelineResponse,
 )
+from backend.schemas.run import RunCreate, RunResponse
 
 
 class InvestigationService(Protocol):
-    """Use cases exposed to the investigation HTTP routes."""
+    """Use cases exposed to the investigation, scenario, and run routes."""
 
     def create(self, payload: InvestigationCreate) -> InvestigationResponse:
         """Create and start an investigation."""
@@ -45,6 +52,20 @@ class InvestigationService(Protocol):
         """Return the available scenario catalog."""
         ...
 
+    def get_scenario(self, scenario_id: str) -> ScenarioDetailResponse:
+        """Return one scenario definition or raise ``NotFoundError``."""
+        ...
+
+    def inject_fault(
+        self, scenario_id: str, fault_config: FaultConfig
+    ) -> ScenarioInjectionResponse:
+        """Validate and preview a fault injection without changing the fixture."""
+        ...
+
     def subsystems(self) -> SubsystemListResponse:
         """Return the available subsystem catalog."""
+        ...
+
+    def create_run(self, payload: RunCreate) -> RunResponse:
+        """Validate, persist, and enqueue an investigation run."""
         ...
