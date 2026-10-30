@@ -1,8 +1,9 @@
 # Configuration
 
 YAML is the source format for subsystem and scenario definitions. These
-directories are intentionally empty in the scaffold: the schemas are not frozen
-yet (see [`docs/data-contracts.md`](../docs/data-contracts.md)).
+directories are intentionally empty: the subsystem and scenario YAML shapes are
+not frozen yet. The core domain contracts that loaders must produce are
+documented in [`docs/data-contracts.md`](../docs/data-contracts.md).
 
 ## Layout
 
@@ -18,10 +19,10 @@ configs/
 
 - Use stable, kebab-case IDs.
 - Make units explicit (`voltage_v`, `duration_s`, `temperature_c`).
-- Use UTC ISO 8601 timestamps.
+- Use UTC ISO 8601 timestamps, or MET seconds with an explicit `mission_start_utc`.
 - Reference subsystem IDs consistently across scenario files.
 - Keep secrets out of YAML; use environment variables.
-- Validate every file with a Pydantic model in `autopsy/models/` before use.
+- Validate every file with a Pydantic model in `autopsy/schemas/` before use.
 - Configuration is data, never executable code.
 
 ## Draft shapes (illustrative only)
@@ -55,5 +56,5 @@ subsystems:
 events: []
 ```
 
-Do not implement loaders against these shapes until the data contracts are
-reviewed.
+Do not implement loaders against these shapes until the subsystem and scenario
+contracts are added.

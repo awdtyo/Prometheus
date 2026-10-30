@@ -3,7 +3,7 @@
 import re
 
 import autopsy
-from autopsy import agents, analysis, graph, ingest, models, simulation
+from autopsy import agents, analysis, graph, ingest, schemas, simulation
 
 
 def test_version_is_semver_like() -> None:
@@ -11,6 +11,6 @@ def test_version_is_semver_like() -> None:
 
 
 def test_core_subpackages_import() -> None:
-    subpackages = (models, ingest, graph, simulation, agents, analysis)
+    subpackages = (schemas, ingest, graph, simulation, agents, analysis)
 
     assert all(module.__name__.startswith("autopsy.") for module in subpackages)

@@ -42,12 +42,12 @@ the domain never knows the backend exists.
 
 | Package / directory       | Responsibility                                                                                         | May depend on                                      | Must not depend on                          |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ------------------------------------------- |
-| `autopsy/models/`         | Pydantic domain models, enums, units, and validation rules                                              | stdlib, Pydantic                                   | FastAPI, backend, SQLite                    |
-| `autopsy/ingest/`         | Read telemetry, event logs, subsystem YAML, and scenario YAML into typed models                         | models, pandas, NumPy, PyYAML                      | FastAPI, backend, SQLite                    |
-| `autopsy/graph/`          | Build and query causal/temporal graphs with NetworkX                                                    | models, NetworkX                                   | FastAPI, backend, SQLite                    |
-| `autopsy/simulation/`     | Deterministic scenario replay, perturbation, and event injection                                        | models, graph, NumPy, pandas                       | FastAPI, backend, SQLite                    |
-| `autopsy/agents/`         | Competing hypothesis generation, provider adapters, structured output parsing                           | models, graph, provider SDKs                       | FastAPI, backend, SQLite                    |
-| `autopsy/analysis/`       | Evidence scoring, consistency checks, ranking, narrative assembly                                       | models, graph, simulation outputs                  | FastAPI, backend, SQLite                    |
+| `autopsy/schemas/`        | Pydantic domain contracts, enums, and validation rules                                                 | stdlib, Pydantic                                   | FastAPI, backend, SQLite                    |
+| `autopsy/ingest/`         | Read telemetry, event logs, subsystem YAML, and scenario YAML into typed models                         | schemas, pandas, NumPy, PyYAML                     | FastAPI, backend, SQLite                    |
+| `autopsy/graph/`          | Build and query causal/temporal graphs with NetworkX                                                    | schemas, NetworkX                                  | FastAPI, backend, SQLite                    |
+| `autopsy/simulation/`     | Deterministic scenario replay, perturbation, and event injection                                        | schemas, graph, NumPy, pandas                      | FastAPI, backend, SQLite                    |
+| `autopsy/agents/`         | Competing hypothesis generation, provider adapters, structured output parsing                           | schemas, graph, provider SDKs                      | FastAPI, backend, SQLite                    |
+| `autopsy/analysis/`       | Evidence scoring, consistency checks, ranking, narrative assembly                                       | schemas, graph, simulation outputs                 | FastAPI, backend, SQLite                    |
 | `backend/api/`            | HTTP routing, request validation, response serialization                                                | FastAPI, schemas, dependencies, services           | SQL, autopsy internals, business logic      |
 | `backend/services/`       | Use-case orchestration, transaction boundaries, domain/persistence translation                          | autopsy, backend.db, backend.schemas (only if needed) | FastAPI                                  |
 | `backend/db/`             | SQLite schema, connections, queries, migrations                                                         | stdlib `sqlite3`                                   | FastAPI, autopsy                            |
@@ -75,7 +75,7 @@ the domain never knows the backend exists.
    them to records and writes them through `backend/db/`. SQLite never leaks into
    `autopsy`.
 5. **Wire models are separate.** `backend/schemas/` defines the public API;
-   `autopsy/models/` defines the domain. Mapping between them happens in the
+   `autopsy/schemas/` defines the domain. Mapping between them happens in the
    service layer, not in routes.
 6. **Frontend is a client.** It may render, validate input, and call HTTP. It
    must not reimplement simulation, graph, or agent logic.
@@ -121,7 +121,8 @@ This flow is **not implemented**. It documents where each future concern belongs
 - The scaffold creates one table, `investigations`, with metadata only:
   `id`, `scenario_id`, `status`, `created_at`, `updated_at`.
 - Domain payloads (telemetry, graphs, hypotheses) are not stored yet. Their
-  schema waits on `docs/data-contracts.md`.
+  contracts are defined in `docs/data-contracts.md`; persistence mapping is not
+  implemented.
 - Migrations are not set up. Add a migration strategy before changing the schema
   in a shared environment.
 - `autopsy` never opens a database connection.
@@ -131,8 +132,8 @@ This flow is **not implemented**. It documents where each future concern belongs
 - Runtime secrets and deployment settings live in `.env` (ignored by git).
   `.env.example` contains placeholders only.
 - Subsystem and scenario definitions live in `configs/subsystems/` and
-  `configs/scenarios/` as YAML. They are empty until the data contracts are
-  agreed.
+  `configs/scenarios/` as YAML. They are empty until the subsystem and scenario
+  YAML contracts are added.
 - Sample telemetry and event logs live in `fixtures/telemetry/` and
   `fixtures/events/`. They must be synthetic or cleared for public use.
 - The frontend reads the repository-root `.env` through Vite's `envDir`; only
@@ -161,7 +162,7 @@ API tests use a temporary SQLite database via the `client` fixture in
 
 ## 10. Evolution notes
 
-- Freeze `docs/data-contracts.md` before implementing `autopsy/models/`.
+- Treat `docs/data-contracts.md` and `autopsy/schemas/` as the frozen contract.
 - Add `autopsy` tests alongside each new module; keep the architecture guard
   green.
 - Add investigation endpoints only after the service layer exists.

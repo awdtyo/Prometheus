@@ -20,4 +20,6 @@ fixtures/
   ignored.
 - Document the source, units, and generation method alongside each fixture.
 
-Formats and schemas are pending [`docs/data-contracts.md`](../docs/data-contracts.md).
+Payloads must validate against the contracts in
+[`autopsy/schemas/`](../autopsy/schemas/); the on-disk file formats are still
+pending. See [`docs/data-contracts.md`](../docs/data-contracts.md).

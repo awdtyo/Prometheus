@@ -5,10 +5,10 @@ the most plausible sequence of events behind a mission failure using telemetry,
 event logs, subsystem dependencies, temporal relationships, and competing
 AI-generated hypotheses.
 
-> **Status: scaffold.** The repository is intentionally runnable, but the domain
-> pipeline and investigation UI are not implemented. The backend exposes
-> `GET /api/health`; the frontend renders a status shell and proves the HTTP
-> connection works.
+> **Status: foundation.** The repository is intentionally runnable. The domain
+> contracts are implemented and tested, but the simulator, graph algorithms,
+> agents, and investigation UI are not. The backend exposes `GET /api/health`;
+> the frontend renders a status shell and proves the HTTP connection works.
 
 ## Stack
 
@@ -24,7 +24,7 @@ AI-generated hypotheses.
 ```text
 .
 ├── autopsy/                 # Pure Python domain package (no FastAPI, no SQLite)
-│   ├── models/              # Pydantic domain models
+│   ├── schemas/             # Pydantic domain contracts and enums
 │   ├── ingest/              # Telemetry, event-log, and YAML loaders
 │   ├── graph/               # NetworkX causal and temporal graphs
 │   ├── simulation/          # Scenario replay and counterfactuals
@@ -42,7 +42,7 @@ AI-generated hypotheses.
 │       ├── api/             # Typed HTTP client
 │       ├── components/      # Presentational components
 │       └── types/           # Wire types
-├── configs/                 # YAML subsystem and scenario definitions (schemas TBD)
+├── configs/                 # YAML subsystem and scenario definitions (YAML contracts TBD)
 ├── fixtures/                # Synthetic telemetry and event-log samples (TBD)
 ├── docs/                    # Architecture, data contracts, API contract
 ├── tests/                   # Pytest suite and architecture guard
@@ -163,7 +163,7 @@ npm --prefix frontend run build
 5. `frontend/` talks to the backend only over HTTP. It must not contain
    simulation, graph, or agent logic.
 6. API DTOs (`backend/schemas/`) stay separate from domain models
-   (`autopsy/models/`) so the wire contract can evolve independently.
+   (`autopsy/schemas/`) so the wire contract can evolve independently.
 7. YAML in `configs/` is data, validated by Pydantic models in `autopsy/`; it is
    never executable code.
 
@@ -184,6 +184,9 @@ and planned request lifecycle.
 
 - Installable `mission-autopsy` package with a framework-independent domain
   skeleton and a `py.typed` marker.
+- Typed domain contracts in `autopsy/schemas/`: telemetry, events, observations,
+  evidence, hypotheses, graphs, run results, fault configuration, and
+  investigation configuration, with JSON round-trip tests.
 - FastAPI application factory, CORS, settings, health endpoint, and OpenAPI docs.
 - SQLite initialization with an `investigations` metadata table.
 - React/Vite/TypeScript status shell with a typed health client and Vite proxy.
@@ -192,13 +195,13 @@ and planned request lifecycle.
 
 ## What does not exist yet
 
-- Telemetry ingestion and validation
+- Telemetry ingestion and YAML loaders (the contracts exist; the readers do not)
 - Scenario simulation
 - Causal graph algorithms
 - Hypothesis-generation agents and ranking
 - Investigation persistence workflows
 - The investigation UI
 
-The next step is to freeze the contracts in
-[`docs/data-contracts.md`](docs/data-contracts.md), then implement `autopsy/`
-vertically before adding investigation routes.
+The next step is to implement `autopsy/ingest/` against the frozen contracts in
+[`docs/data-contracts.md`](docs/data-contracts.md), then build the graph and
+simulation layers before adding investigation routes.
