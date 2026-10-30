@@ -3,13 +3,18 @@
    -------------------------------------------------------
    View and manage scenario configurations. Lists available scenarios
    with their subsystem definitions and allows loading a scenario to
-   start an investigation.
+   start an investigation. Includes fault injection configuration.
    ============================================================================= */
 
 import { useEffect, useState } from "react";
 import { listScenarios } from "../../api/client";
 import type { MockScenario } from "../../types/api";
 import { ScenarioSummary } from "../../types/domain";
+import { FaultInjectionPanel } from "../../components/FaultInjectionPanel";
+
+/* =============================================================================
+   Scenario Explorer Page
+   ------------------------------------------------------- */
 
 export function ScenarioExplorerPage() {
   const [scenarios, setScenarios] = useState<MockScenario[]>([]);
@@ -48,7 +53,7 @@ export function ScenarioExplorerPage() {
     <section className="page scenario-explorer">
       <div className="page__header">
         <h2 className="page__title">Scenario Explorer</h2>
-        <p className="page__subtitle">Available scenario configurations</p>
+        <p className="page__subtitle">Available mission scenarios</p>
       </div>
 
       {error && (
@@ -71,17 +76,37 @@ export function ScenarioExplorerPage() {
                 <strong>Mission start:</strong> {scenario.mission_start_utc}
               </span>
               <span className="meta-item">
-                <strong>Subsystems:</strong> {scenario.subsystems.join(", ")}
+                <strong>Mission duration:</strong> {calculateMissionDuration(scenario.mission_start_utc)}
+              </span>
+              <span className="meta-item">
+                <strong>Participating subsystems:</strong> {scenario.subsystems.join(", ")}
               </span>
             </div>
             <div className="scenario-card__actions">
               <button className="button button--secondary">
                 Load Scenario
               </button>
-              <button className="button button--tertiary">
-                Delete
-              </button>
-            </div>
+              <FaultInjectionPanel
+                onSubmit={({ fault_type, target_subsystem, target_parameter, start_time, duration_seconds, magnitude, parameters }) => {
+                  // Handle fault injection submission
+                  console.log("Fault configuration submitted:", {
+                    fault_type,
+                    target_subsystem,
+                    target_parameter,
+                    start_time,
+                    duration_seconds,
+                    magnitude,
+                    parameters,
+                  });
+                  // In a real implementation, this would call POST /api/v1/runs
+                  // with the fault configuration
+                }}
+              />
+            </button>
+            <button className="button button--tertiary">
+              Delete
+              <span className="ml-2">✕</span>
+            </button>
           </article>
         ))}
       </div>
@@ -93,4 +118,15 @@ export function ScenarioExplorerPage() {
       )}
     </section>
   );
+}
+
+/* -------------------------------------------------------
+   Helper: calculate mission duration from start time
+   ------------------------------------------------------- */
+
+function calculateMissionDuration(startUtc: string): string {
+  // In a real implementation, this would calculate the duration
+  // from mission_start_utc to present or mission end time
+  // For now, return a descriptive string
+  return "Variable (mission-dependent)";
 }

@@ -139,6 +139,14 @@ function App() {
             </button>
             <button
               className={`topbar-nav__item ${
+                currentPath === "/investigation" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/investigation")}
+            >
+              Live Investigation
+            </button>
+            <button
+              className={`topbar-nav__item ${
                 currentPath === "/causal-graph" ? "topbar-nav__item--active" : ""
               }`}
               onClick={() => navigate("/causal-graph")}
