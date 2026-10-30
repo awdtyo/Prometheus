@@ -12,12 +12,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from autopsy import __version__
 from backend.api.router import api_router
 from backend.db.database import init_db
+from backend.errors import install_exception_handlers
+from backend.logging_config import configure_logging
+from backend.middleware import RequestContextMiddleware
+from backend.services.factory import build_investigation_service
 from backend.settings import Settings, get_settings
+from backend.version import get_core_version
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("backend.main")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -26,20 +30,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     Passing explicit settings keeps tests isolated from the developer's ``.env``.
     """
     resolved = settings or get_settings()
-    logging.basicConfig(
-        level=resolved.log_level.upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging(resolved)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         init_db(resolved.database_path)
-        logger.info("SQLite ready at %s", resolved.database_path)
-        yield
+        app.state.investigation_service = build_investigation_service(resolved)
+        logger.info(
+            "Application started",
+            extra={
+                "event": "startup",
+                "environment": resolved.environment,
+                "database_path": str(resolved.database_path),
+                "mock_services": resolved.use_mock_services,
+            },
+        )
+        try:
+            yield
+        finally:
+            logger.info("Application stopped", extra={"event": "shutdown"})
 
     app = FastAPI(
         title=resolved.app_name,
-        version=__version__,
+        version=get_core_version(),
         description="HTTP surface for Mission Autopsy incident reconstruction.",
         lifespan=lifespan,
     )
@@ -47,11 +60,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved.cors_origin_list,
-        allow_credentials=True,
+        allow_credentials="*" not in resolved.cors_origin_list,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
-    app.include_router(api_router, prefix="/api")
+    app.add_middleware(RequestContextMiddleware)
+    install_exception_handlers(app)
+    app.include_router(api_router, prefix=resolved.api_prefix)
 
     @app.get("/", include_in_schema=False)
     def docs_redirect() -> RedirectResponse:

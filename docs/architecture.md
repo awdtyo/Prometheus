@@ -84,11 +84,12 @@ the domain never knows the backend exists.
 
 ## 5. Request lifecycle
 
-### Current: `GET /api/health`
+### Current: `GET /api/v1/health`
 
 ```text
 Browser
   -> Vite dev server (/api proxy)
+  -> RequestContextMiddleware (request ID, access log)
   -> FastAPI router (backend/api/routes/health.py)
   -> Settings dependency (backend/dependencies.py)
   -> HealthResponse DTO
@@ -97,10 +98,25 @@ Browser
 
 There is no service or database call on this path; it is a liveness check.
 
-### Planned: create an investigation
+### Current: create an investigation with the mock service
 
 ```text
-POST /api/investigations
+POST /api/v1/investigations
+  -> route validates InvestigationCreate
+  -> InvestigationService.create()          (MISSION_AUTOPSY_USE_MOCK_SERVICES)
+       -> create investigation record through backend.db
+       -> return deterministic mock summary
+  -> route returns InvestigationResponse
+```
+
+The mock service also generates hypotheses and timeline data from the stored
+investigation and streams progress through server-sent events. It does not import
+simulator, graph, or agent code.
+
+### Planned: create an investigation with the autopsy pipeline
+
+```text
+POST /api/v1/investigations
   -> route validates InvestigationCreate
   -> InvestigationService.create()
        -> load scenario + subsystem YAML through autopsy.ingest
@@ -108,23 +124,28 @@ POST /api/investigations
        -> run autopsy pipeline:
             simulation -> graph -> agents -> analysis
        -> persist hypotheses and ranked narrative
-  -> route returns InvestigationRead
+  -> route returns InvestigationResponse
 ```
 
-This flow is **not implemented**. It documents where each future concern belongs.
+The mock is a stand-in for this flow. The route contract does not change when the
+adapter is implemented.
 
 ## 6. Persistence boundary
 
 - SQLite file location comes from `MISSION_AUTOPSY_DATABASE_PATH`
   (default `./data/mission_autopsy.db`, resolved from the repository root).
 - `backend/db/database.py` owns the connection helper and idempotent schema.
-- The scaffold creates one table, `investigations`, with metadata only:
-  `id`, `scenario_id`, `status`, `created_at`, `updated_at`.
+- The backend creates one table, `investigations`, with metadata and progress:
+  `id`, `scenario_id`, `title`, `description`, `fault_type`, `status`,
+  `progress`, `current_stage`, `error_message`, `created_at`, `updated_at`,
+  `completed_at`.
+- `backend/db/investigations.py` owns investigation queries, including opaque
+  keyset pagination cursors.
 - Domain payloads (telemetry, graphs, hypotheses) are not stored yet. Their
-  contracts are defined in `docs/data-contracts.md`; persistence mapping is not
-  implemented.
-- Migrations are not set up. Add a migration strategy before changing the schema
-  in a shared environment.
+  contracts are defined in `docs/data-contracts.md`; the mock generates
+  hypotheses and timeline data deterministically from the investigation ID.
+- Column migrations are idempotent and run at startup. Add a real migration
+  framework before changing the schema in a shared environment.
 - `autopsy` never opens a database connection.
 
 ## 7. Configuration and fixtures
@@ -152,12 +173,13 @@ This flow is **not implemented**. It documents where each future concern belongs
 API tests use a temporary SQLite database via the `client` fixture in
 `tests/conftest.py`; they never touch `data/`.
 
-## 9. Non-goals for this scaffold
+## 9. Non-goals for this backend milestone
 
 - No telemetry parsing, simulation, graph construction, agent calls, or ranking.
-- No investigation CRUD, authentication, background jobs, or streaming.
+- No real investigation execution; the mock service is deterministic.
+- No authentication, authorization, or background job queue.
 - No frontend investigation dashboard or data visualization.
-- No ORM, migration framework, or external database.
+- No ORM or external database.
 - No deployment configuration (containers, CI, hosting).
 
 ## 10. Evolution notes
@@ -165,8 +187,8 @@ API tests use a temporary SQLite database via the `client` fixture in
 - Treat `docs/data-contracts.md` and `autopsy/schemas/` as the frozen contract.
 - Add `autopsy` tests alongside each new module; keep the architecture guard
   green.
-- Add investigation endpoints only after the service layer exists.
-- Introduce `/api/v1` (or another explicit versioning scheme) before the first
-  external consumer depends on the API.
+- Replace the mock service in `backend/services/factory.py` with an `autopsy`
+  adapter without changing route contracts.
+- Keep `/api/v1` stable; introduce `/api/v2` for breaking wire changes.
 - If SQLite access grows, consider a repository module per aggregate before
   reaching for an ORM.

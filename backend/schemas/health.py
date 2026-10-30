@@ -2,11 +2,11 @@
 
 from typing import Literal
 
-from pydantic import BaseModel
+from backend.schemas.base import ApiModel
 
 
-class HealthResponse(BaseModel):
-    """Liveness and build metadata returned by ``GET /api/health``."""
+class HealthResponse(ApiModel):
+    """Liveness and build metadata returned by ``GET /api/v1/health``."""
 
     status: Literal["ok"] = "ok"
     service: str

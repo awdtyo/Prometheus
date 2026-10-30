@@ -5,10 +5,12 @@ the most plausible sequence of events behind a mission failure using telemetry,
 event logs, subsystem dependencies, temporal relationships, and competing
 AI-generated hypotheses.
 
-> **Status: foundation.** The repository is intentionally runnable. The domain
-> contracts are implemented and tested, but the simulator, graph algorithms,
-> agents, and investigation UI are not. The backend exposes `GET /api/health`;
-> the frontend renders a status shell and proves the HTTP connection works.
+> **Status: backend mock complete.** The domain contracts are implemented and
+> tested, but the simulator, graph algorithms, agents, and investigation UI are
+> not. The backend exposes a versioned `/api/v1` surface backed by deterministic
+> mock services, so investigation, catalog, error, and SSE flows can be tested
+> without the `autopsy` pipeline. The frontend renders a status shell and proves
+> the HTTP connection works.
 
 ## Stack
 
@@ -31,10 +33,13 @@ AI-generated hypotheses.
 │   ├── agents/              # Competing hypothesis generation
 │   └── analysis/            # Evidence scoring and hypothesis ranking
 ├── backend/                 # FastAPI application and persistence
-│   ├── api/                 # Routers and thin HTTP handlers
-│   ├── services/            # Orchestration layer (no FastAPI imports)
-│   ├── db/                  # SQLite schema and connection helpers
+│   ├── api/                 # Routers, versioning, and thin HTTP handlers
+│   ├── services/            # Service contracts, factory, and mock implementation
+│   ├── db/                  # SQLite schema, connections, and investigation queries
 │   ├── schemas/             # HTTP request/response DTOs
+│   ├── errors.py            # RFC 9457 problem responses
+│   ├── logging_config.py    # Structured JSON/text logging
+│   ├── middleware.py        # Request IDs and access logs
 │   ├── settings.py          # Environment-backed configuration
 │   └── main.py              # Application factory and entry point
 ├── frontend/                # React + Vite + TypeScript client
@@ -72,12 +77,13 @@ copies `.env.example` to `.env` if needed, and installs the frontend packages.
 ./scripts/dev.sh
 ```
 
-| Service      | URL                              |
-| ------------ | -------------------------------- |
-| Frontend     | http://127.0.0.1:5173            |
-| Backend API  | http://127.0.0.1:8000            |
-| API docs     | http://127.0.0.1:8000/docs       |
-| Health check | http://127.0.0.1:8000/api/health |
+| Service         | URL                                   |
+| --------------- | ------------------------------------- |
+| Frontend        | http://127.0.0.1:5173                 |
+| Backend API     | http://127.0.0.1:8000                 |
+| API docs        | http://127.0.0.1:8000/docs            |
+| Health check    | http://127.0.0.1:8000/api/v1/health   |
+| Legacy health   | http://127.0.0.1:8000/api/health      |
 
 The Vite dev server proxies `/api` to the backend, so the browser only talks to
 the frontend origin during development.
@@ -100,11 +106,40 @@ source .venv/bin/activate
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1` and use
+`python -m uvicorn backend.main:app --reload` if `uvicorn` is not on `PATH`.
+
 Run the frontend in a second terminal:
 
 ```bash
 npm --prefix frontend run dev
 ```
+
+### Backend-only quick start
+
+The backend runs with mock services and does not require the `autopsy` pipeline:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+cp .env.example .env                 # Windows: Copy-Item .env.example .env
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Try it with:
+
+```bash
+curl http://127.0.0.1:8000/api/v1/health
+curl http://127.0.0.1:8000/api/v1/scenarios
+curl -X POST http://127.0.0.1:8000/api/v1/investigations \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"scn_power_undervoltage"}'
+```
+
+Run the backend test suite with `python -m pytest tests -q`. See
+[`docs/api-contract.md`](docs/api-contract.md) for every route and payload and
+[`backend/README.md`](backend/README.md) for backend internals.
 
 ## Configuration
 
@@ -115,11 +150,15 @@ placeholder.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MISSION_AUTOPSY_ENVIRONMENT` | `development` | `development`, `test`, or `production` |
+| `MISSION_AUTOPSY_API_PREFIX` | `/api` | Base HTTP prefix; versioned routes live under `/v1` |
 | `MISSION_AUTOPSY_API_HOST` | `127.0.0.1` | Uvicorn bind host used by scripts |
 | `MISSION_AUTOPSY_API_PORT` | `8000` | Uvicorn port used by scripts |
-| `MISSION_AUTOPSY_LOG_LEVEL` | `INFO` | Python log level |
+| `MISSION_AUTOPSY_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
+| `MISSION_AUTOPSY_LOG_FORMAT` | `json` | Structured `json` logs or `text` for local development |
 | `MISSION_AUTOPSY_DATABASE_PATH` | `./data/mission_autopsy.db` | SQLite file, resolved from the repo root |
 | `MISSION_AUTOPSY_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed origins |
+| `MISSION_AUTOPSY_USE_MOCK_SERVICES` | `true` | Use deterministic mock investigations until the pipeline is wired |
+| `MISSION_AUTOPSY_MOCK_STREAM_DELAY_SECONDS` | `0` | Delay between SSE progress events (`0`–`5`) |
 | `VITE_API_BASE_URL` | `/api` | Browser-facing API base path |
 | `VITE_API_PROXY_TARGET` | `http://127.0.0.1:8000` | Vite dev proxy target |
 | `VITE_API_DOCS_URL` | `http://127.0.0.1:8000/docs` | "Open API docs" link |
@@ -187,11 +226,15 @@ and planned request lifecycle.
 - Typed domain contracts in `autopsy/schemas/`: telemetry, events, observations,
   evidence, hypotheses, graphs, run results, fault configuration, and
   investigation configuration, with JSON round-trip tests.
-- FastAPI application factory, CORS, settings, health endpoint, and OpenAPI docs.
-- SQLite initialization with an `investigations` metadata table.
+- FastAPI application factory, CORS, environment settings, structured logging,
+  request IDs, centralized RFC 9457 errors, health endpoint, and OpenAPI docs.
+- Versioned `/api/v1` investigation and catalog routes backed by SQLite and a
+  deterministic mock service, including cursor pagination and SSE progress.
+- SQLite initialization with an `investigations` metadata table and idempotent
+  column migrations.
 - React/Vite/TypeScript status shell with a typed health client and Vite proxy.
-- Pytest smoke tests, an architecture import guard, Ruff/mypy config, and
-  frontend lint/build scripts.
+- Pytest coverage for every implemented endpoint, an architecture import guard,
+  Ruff config, and frontend lint/build scripts.
 
 ## What does not exist yet
 
@@ -199,9 +242,11 @@ and planned request lifecycle.
 - Scenario simulation
 - Causal graph algorithms
 - Hypothesis-generation agents and ranking
-- Investigation persistence workflows
+- Real investigation execution and persistence workflows
 - The investigation UI
 
-The next step is to implement `autopsy/ingest/` against the frozen contracts in
-[`docs/data-contracts.md`](docs/data-contracts.md), then build the graph and
-simulation layers before adding investigation routes.
+The backend's mock service is the integration point: replace it with an adapter
+around `autopsy` in `backend/services/factory.py` once the pipeline exists. The
+next domain step is to implement `autopsy/ingest/` against the frozen contracts
+in [`docs/data-contracts.md`](docs/data-contracts.md), then build the graph and
+simulation layers.

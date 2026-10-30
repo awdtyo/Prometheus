@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter
 
-from autopsy import __version__
 from backend.dependencies import SettingsDep
 from backend.schemas.health import HealthResponse
+from backend.version import get_core_version
 
 router = APIRouter(tags=["system"])
 
@@ -14,6 +14,6 @@ def read_health(settings: SettingsDep) -> HealthResponse:
     """Return liveness and build metadata for the API."""
     return HealthResponse(
         service=settings.app_name,
-        version=__version__,
+        version=get_core_version(),
         environment=settings.environment,
     )
