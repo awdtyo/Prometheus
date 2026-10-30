@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-
-import { API_DOCS_URL, getHealth } from "./api/client";
-import { HealthBadge } from "./components/HealthBadge";
+import { useLocation, useNavigate } from "react-router-dom";
+import { API_DOCS_URL } from "./api/client";
 import type { ConnectionStatus, HealthResponse } from "./types/api";
+import { getHealth } from "./api/client";
 
 type HealthState =
   | { status: "loading" }
@@ -38,6 +38,8 @@ const PIPELINE_MODULES = [
 
 function App() {
   const [health, setHealth] = useState<HealthState>({ status: "loading" });
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,19 +69,88 @@ function App() {
   const serviceVersion = health.status === "online" ? health.data.version : "—";
   const environment = health.status === "online" ? health.data.environment : "—";
 
+  // Extract current path from router for sidebar/top bar active state
+  const currentPath = location.pathname === "/" ? "/" : location.pathname;
+
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand">
-          <div className="brand__mark" aria-hidden="true">
-            <span />
-          </div>
-          <div>
-            <p className="brand__name">Mission Autopsy</p>
-            <p className="brand__sub">Incident reconstruction console</p>
+        <div className="topbar__left">
+          <div className="brand">
+            <div className="brand__mark" aria-hidden="true">
+              <span />
+            </div>
+            <div>
+              <p className="brand__name">Mission Autopsy</p>
+              <p className="brand__sub">Incident reconstruction console</p>
+            </div>
           </div>
         </div>
-        <HealthBadge status={connectionStatus} />
+
+        <div className="topbar__center">
+          <nav className="topbar-nav">
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/")}
+            >
+              Mission Overview
+            </button>
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/scenarios" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/scenarios")}
+            >
+              Scenario Explorer
+            </button>
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/workspace" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/workspace")}
+            >
+              Investigation Workspace
+            </button>
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/causal-graph" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/causal-graph")}
+            >
+              Causal Graph
+            </button>
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/hypotheses" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/hypotheses")}
+            >
+              Hypothesis Analysis
+            </button>
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/evaluation" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/evaluation")}
+            >
+              Evaluation Dashboard
+            </button>
+            <button
+              className={`topbar-nav__item ${
+                currentPath === "/causal-graph" ? "topbar-nav__item--active" : ""
+              }`}
+              onClick={() => navigate("/causal-graph")}
+            >
+              Causal Graph
+            </button>
+          </nav>
+        </div>
+
+        <div className="topbar__right">
+          <HealthBadge status={connectionStatus} />
+        </div>
       </header>
 
       <main>
