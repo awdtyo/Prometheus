@@ -12,6 +12,10 @@ import type {
   ScenarioSummary,
   ObservationSummary,
   EvaluationMetrics,
+  BaselineComparison,
+  ScenarioPerformance,
+  ErrorBreakdown,
+  HypothesisRankingComparison,
   MockInvestigation,
   MockScenario,
   MockObservation,
@@ -373,11 +377,11 @@ export async function listHypotheses(
   }));
 }
 
-/** GET /api/investigations/{investigation_id}/timeline */
-export async function getTimeline(
+/** GET /api/investigations/{investigation_id}/evaluation-metrics */
+export async function getEvaluationMetrics(
   investigationId: EntityId,
   signal?: AbortSignal,
-): Promise<TimelineEvent[]> {
+): Promise<EvaluationMetrics> {
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   if (signal?.aborted) {
@@ -390,13 +394,134 @@ export async function getTimeline(
     throw new Error(`Investigation ${investigationId} not found`);
   }
 
-  return inv.observations.map((obs) => ({
-    event_id: obs.observation_id,
-    timestamp: obs.timestamp,
-    subsystem: obs.subsystem,
-    event_type: obs.observation_type,
-    description: obs.description,
-    severity: obs.severity,
+  return {
+    root_cause_accuracy: inv.evaluation_metrics?.root_cause_accuracy ?? 1.0,
+    runtime_seconds: inv.evaluation_metrics?.runtime_seconds ?? 124.5,
+    evidence_weight: inv.evaluation_metrics?.evidence_weight ?? 0.4,
+    consistency_weight: inv.evaluation_metrics?.consistency_weight ?? 0.35,
+    coverage_weight: inv.evaluation_metrics?.coverage_weight ?? 0.25,
+    contradiction_penalty: inv.evaluation_metrics?.contradiction_penalty ?? 0.2,
+    fault_localization_accuracy: 0.85,
+    causal_chain_accuracy: 0.78,
+    evidence_coverage: 0.72,
+    temporal_ordering_accuracy: 0.81,
+    contradiction_handling: 0.74,
+    unsupported_claim_rate: 0.12,
+  };
+}
+
+/** GET /api/investigations/{investigation_id}/baseline-comparison */
+export async function getBaselineComparison(
+  investigationId: EntityId,
+  signal?: AbortSignal,
+): Promise<BaselineComparison> {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  const inv = MOCK_INVESTIGATIONS.find((i) => i.investigation_id === investigationId);
+
+  if (!inv) {
+    throw new Error(`Investigation ${investigationId} not found`);
+  }
+
+  // Use the existing evaluation metrics to derive baseline comparisons
+  const metrics = inv.evaluation_metrics;
+  return {
+    threshold_only: metrics?.fault_localization_accuracy ?? 0.65,
+    earliest_anomaly: metrics?.causal_chain_accuracy ?? 0.70,
+    dependency_only: metrics?.evidence_coverage ?? 0.70,
+    full_autopsy: 0.88, // Mission Autopsy overall performance
+  };
+}
+
+/** GET /api/investigations/{investigation_id}/scenario-performance */
+export async function getScenarioPerformance(
+  investigationId: EntityId,
+  signal?: AbortSignal,
+): Promise<ScenarioPerformance[]> {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  const inv = MOCK_INVESTIGATIONS.find((i) => i.investigation_id === investigationId);
+
+  if (!inv) {
+    throw new Error(`Investigation ${investigationId} not found`);
+  }
+
+  const scenarioId = inv.scenario_id;
+  // Return performance data for scenarios associated with this investigation
+  return [
+    {
+      scenario_id: scenarioId,
+      scenario_name: inv.scenario?.name || "Unknown Scenario",
+      fault_localization: 0.85,
+      causal_accuracy: 0.78,
+      evidence_cov: 0.72,
+      temporal_accuracy: 0.81,
+      contradiction_score: 0.74,
+      unsupported_rate: 0.12,
+    },
+  ];
+}
+
+/** GET /api/investigations/{investigation_id}/error-breakdown */
+export async function getErrorBreakdown(
+  investigationId: EntityId,
+  signal?: AbortSignal,
+): Promise<ErrorBreakdown> {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  const inv = MOCK_INVESTIGATIONS.find((i) => i.investigation_id === investigationId);
+
+  if (!inv) {
+    throw new Error(`Investigation ${investigationId} not found`);
+  }
+
+  return {
+    mislocalized_faults: 3,
+    chain_errors: 2,
+    temporal_errors: 1,
+    unsupported_claims: 2,
+    total_evidence: inv.observations?.length || 2,
+  };
+}
+
+/** GET /api/investigations/{investigation_id}/hypothesis-ranking-comparison */
+export async function getHypothesisRankingComparison(
+  investigationId: EntityId,
+  signal?: AbortSignal,
+): Promise<HypothesisRankingComparison[]> {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  if (signal?.aborted) {
+    throw new Error("Aborted");
+  }
+
+  const inv = MOCK_INVESTIGATIONS.find((i) => i.investigation_id === investigationId);
+
+  if (!inv) {
+    throw new Error(`Investigation ${investigationId} not found`);
+  }
+
+  return inv.hypotheses.map((hyp) => ({
+    hypothesis_id: hyp.hypothesis_id,
+    title: hyp.title,
+    rank: hyp.evidence_ids?.length > 0 ? 1 : 3, // Simple ranking based on evidence
+    score: hyp.score,
+    causal_acc: hyp.confidence,
+    evidence_count: hyp.evidence_ids?.length || 0,
+    contradiction_count: hyp.contradiction_ids?.length || 0,
+    assumptions_count: hyp.assumptions?.length || 0,
   }));
 }
 

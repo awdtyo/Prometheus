@@ -123,6 +123,53 @@ export interface EvaluationMetrics {
   consistency_weight: number;
   coverage_weight: number;
   contradiction_penalty: number;
+  fault_localization_accuracy: number;
+  causal_chain_accuracy: number;
+  evidence_coverage: number;
+  temporal_ordering_accuracy: number;
+  contradiction_handling: number;
+  unsupported_claim_rate: number;
+}
+
+/** Baseline comparison results */
+export interface BaselineComparison {
+  threshold_only: number;
+  earliest_anomaly: number;
+  dependency_only: number;
+  full_autopsy: number;
+}
+
+/** Per-scenario performance */
+export interface ScenarioPerformance {
+  scenario_id: string;
+  scenario_name: string;
+  fault_localization: number;
+  causal_accuracy: number;
+  evidence_cov: number;
+  temporal_accuracy: number;
+  contradiction_score: number;
+  unsupported_rate: number;
+}
+
+/** Error breakdown */
+export interface ErrorBreakdown {
+  mislocalized_faults: number;
+  chain_errors: number;
+  temporal_errors: number;
+  unsupported_claims: number;
+  total_evidence: number;
+}
+
+/** Hypothesis ranking comparison */
+export interface HypothesisRankingComparison {
+  hypothesis_id: string;
+  title: string;
+  rank: number;
+  score: number;
+  causal_acc: number;
+  evidence_count: number;
+  contradiction_count: number;
+  assumptions_count: number;
 }
 
 /* =============================================================================
