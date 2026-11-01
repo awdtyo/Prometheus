@@ -45,5 +45,6 @@
         "evt_003"
       ]
     }
-  ]
+  ],
+  "expected_terminal_state": "mission_failure"
 }

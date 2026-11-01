@@ -1,8 +1,9 @@
 # Evaluation metrics
 
-The evaluation harness populates all 12 ``EvaluationMetrics`` fields from
-docs/api-contract.md into ``RunResult.evaluation_metrics`` for every
-(scenario, seed, variant) run.
+The evaluation harness computes all 12 ``EvaluationMetrics`` fields from
+docs/api-contract.md for every (scenario, seed, variant) run. Ground truth
+(``fixtures/expected/*_ground_truth.json``) is loaded only by the evaluation
+module and is never passed to hypothesis agents.
 
 ## Metric definitions
 
@@ -28,6 +29,18 @@ Three baselines run alongside the pipeline:
 * ``earliest_anomaly`` — blames the subsystem of the earliest observation.
 * ``single_llm`` — one LLM call with a condensed telemetry/event summary, no graph.
 * ``no_spec`` — full pipeline with graph spec constraints disabled (ablation).
+
+## LLM mode and result files
+
+The CLI accepts ``--fake-llm`` (default) or ``--real-llm``. Results are written
+to mode-specific files under ``data/eval/`` (``results.fake.json`` and
+``results.real.json``) and every row is tagged with its ``mode``.
+
+**Fake-LLM numbers only test the plumbing.** The fake LLM returns deterministic,
+schema-valid canned outputs; it does not reason about the data. Fake-LLM metrics
+therefore measure that the pipeline, scoring, and metrics wiring execute without
+error — they are not an assessment of root-cause quality. Real-LLM numbers are
+the only ones that reflect actual hypothesis quality.
 
 ## Boundary
 

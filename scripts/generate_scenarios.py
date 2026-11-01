@@ -621,9 +621,22 @@ def _write_ground_truth(scenario: dict) -> None:
     path.write_text(json.dumps(scenario["ground_truth"], indent=2))
 
 
+TERMINAL_STATES = {
+    "solar_shadowing": "recovery",
+    "heater_stuck_on": "safe_mode",
+    "reaction_wheel_degradation": "safe_mode",
+    "transmitter_overdraw": "safe_mode",
+    "decoy_sensor_bias": "recovery",
+    "compound_two_cause": "mission_failure",
+}
+
+
 def main() -> None:
     _seeded(SEED)
     for scenario in SCENARIOS:
+        scenario["ground_truth"]["expected_terminal_state"] = TERMINAL_STATES[
+            scenario["id"]
+        ]
         _write_yaml(scenario)
         _write_telemetry(scenario)
         _write_events(scenario)

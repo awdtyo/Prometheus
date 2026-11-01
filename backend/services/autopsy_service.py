@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 from autopsy.ingest.loaders import (
-    load_investigation_inputs,
     load_scenario_spec,
     load_subsystem_specs,
 )
@@ -34,7 +33,6 @@ from backend.exceptions import BadRequestError, NotFoundError
 from backend.schemas.catalog import (
     FaultConfig,
     FaultOptionResponse,
-    FaultType,
     ScenarioDetailResponse,
     ScenarioInjectionResponse,
     ScenarioListResponse,
@@ -182,59 +180,6 @@ def _record_to_response(record: InvestigationRecord) -> InvestigationResponse:
         completed_at=(
             parse_iso_z(record.completed_at) if record.completed_at is not None else None
         ),
-    )
-
-
-def _subsystem_response(definition: SubsystemDefinition) -> SubsystemResponse:
-    return SubsystemResponse(
-        id=definition.id,
-        name=definition.name,
-        description=definition.description,
-        depends_on=list(definition.depends_on),
-    )
-
-
-def _scenario_summary(definition: ScenarioDefinition) -> ScenarioResponse:
-    return ScenarioResponse(
-        id=definition.id,
-        name=definition.name,
-        description=definition.description,
-        duration_seconds=definition.duration_seconds,
-        subsystem_ids=list(definition.subsystem_ids),
-        fault_types=list(definition.fault_types),
-    )
-
-
-def _scenario_detail(definition: ScenarioDefinition) -> ScenarioDetailResponse:
-    return ScenarioDetailResponse(
-        **_scenario_summary(definition).model_dump(),
-        mission_start_utc=definition.mission_start_utc,
-        subsystems=[
-            _subsystem_response(SUBSYSTEMS[subsystem_id])
-            for subsystem_id in definition.subsystem_ids
-        ],
-        telemetry_parameters=[
-            TelemetryParameterResponse(
-                parameter=parameter.parameter,
-                subsystem=parameter.subsystem,
-                unit=parameter.unit,
-                nominal_value=parameter.nominal_value,
-                description=parameter.description,
-            )
-            for parameter in definition.telemetry_parameters
-        ],
-        fault_options=[
-            FaultOptionResponse(
-                fault_type=option.fault_type,
-                description=option.description,
-                target_subsystems=list(option.target_subsystems),
-                min_duration_seconds=option.min_duration_seconds,
-                max_duration_seconds=option.max_duration_seconds,
-                min_magnitude=option.min_magnitude,
-                max_magnitude=option.max_magnitude,
-            )
-            for option in definition.fault_options
-        ],
     )
 
 

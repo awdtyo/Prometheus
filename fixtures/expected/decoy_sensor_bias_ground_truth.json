@@ -34,5 +34,6 @@
         "evt_002"
       ]
     }
-  ]
+  ],
+  "expected_terminal_state": "recovery"
 }

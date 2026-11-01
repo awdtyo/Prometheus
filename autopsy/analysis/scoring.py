@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from autopsy.ids import evt_node_id, is_node_id, obs_node_id, parse_node_id
+from autopsy.ids import evt_node_id, obs_node_id
 from autopsy.schemas.events import MissionEvent
 from autopsy.schemas.evidence import Evidence, EvidenceStance
 from autopsy.schemas.graph import Graph
@@ -22,9 +22,9 @@ class ScoringConfig:
     w_explained: float = 0.4
     w_edge_conf: float = 0.3
     w_evidence: float = 0.3
-    penalty_contradiction: float = 0.15
-    penalty_unexplained_downstream: float = 0.1
-    penalty_unsupported_link: float = 0.1
+    penalty_contradiction: float = 0.002
+    penalty_unexplained_downstream: float = 0.005
+    penalty_unsupported_link: float = 0.005
 
 
 @dataclass
@@ -109,17 +109,44 @@ def validate_claims(
 def _chain_explains(h: Hypothesis, observations: list[Observation]) -> set[str]:
     chain = set(h.causal_chain)
     obs_id_to_subsystem = {o.observation_id: o.subsystem for o in observations}
+    obs_node_to_subsystem = {obs_node_id(o.observation_id): o.subsystem for o in observations}
     chain_subsystems = set()
-    for nid in h.causal_chain:
-        if is_node_id(nid):
-            _, opaque = parse_node_id(nid)
-            if opaque in obs_id_to_subsystem:
-                chain_subsystems.add(obs_id_to_subsystem[opaque])
-    explained = set()
-    for o in observations:
-        if obs_node_id(o.observation_id) in chain or o.subsystem in chain_subsystems:
-            explained.add(o.observation_id)
+    for nid in chain:
+        if nid in obs_id_to_subsystem:
+            chain_subsystems.add(obs_id_to_subsystem[nid])
+        elif nid in obs_node_to_subsystem:
+            chain_subsystems.add(obs_node_to_subsystem[nid])
+    # A causal chain rooted in a subsystem explains the observations of that
+    # subsystem (root-cause scope), not only the single cited node.
+    explained = {o.observation_id for o in observations if o.subsystem in chain_subsystems}
     return explained
+
+
+def _normalize_chain(
+    h: Hypothesis, observations: list[Observation], events: list[MissionEvent]
+) -> list[str]:
+    """Normalize causal-chain node ids to canonical graph-node ids.
+
+    The LLM may cite either the raw observation id
+    (``obs_eps_battery_voltage_v_1``) or the canonical graph node id
+    (``obs:obs_eps_battery_voltage_v_1``). Map both to the canonical form so
+    edge lookups against the graph (which uses prefixed ids) succeed.
+    """
+    raw_to_node = {}
+    for o in observations:
+        raw_to_node[o.observation_id] = obs_node_id(o.observation_id)
+    for e in events:
+        raw_to_node[e.event_id] = evt_node_id(e.event_id)
+
+    normalized = []
+    for nid in h.causal_chain:
+        if nid in raw_to_node:
+            normalized.append(raw_to_node[nid])
+        elif nid.startswith("obs:") or nid.startswith("evt:"):
+            normalized.append(nid)
+        else:
+            normalized.append(nid)
+    return normalized
 
 
 def score_hypotheses(
@@ -142,11 +169,12 @@ def score_hypotheses(
         total = max(1, len(observations))
         frac_explained = len(explained) / total
 
+        norm_chain = _normalize_chain(h, observations, events)
         edge_map = {(e.source, e.target): e for e in graph.edges}
         edge_confs = []
         unsupported = 0
-        for i in range(len(h.causal_chain) - 1):
-            a, b = h.causal_chain[i], h.causal_chain[i + 1]
+        for i in range(len(norm_chain) - 1):
+            a, b = norm_chain[i], norm_chain[i + 1]
             edge = edge_map.get((a, b))
             if edge is None:
                 unsupported += 1

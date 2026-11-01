@@ -119,7 +119,8 @@ def _temporal_ordering(leading, observations, events) -> float:
 
 def compute_metrics(
     scenario_id: str,
-    result,
+    hypotheses,
+    evidence,
     ground_truth,
     observations,
     events,
@@ -128,7 +129,7 @@ def compute_metrics(
     chain_score_detail: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     chain_score_detail = chain_score_detail or {}
-    leading = result.hypotheses[0] if result.hypotheses else None
+    leading = hypotheses[0] if hypotheses else None
     target = (
         ground_truth.injected_fault.target_subsystem if ground_truth else None
     )
@@ -140,7 +141,7 @@ def compute_metrics(
             root_cause = 1.0
         if any(
             _chain_references_subsystem(h.causal_chain, target, observations, events)
-            for h in result.hypotheses
+            for h in hypotheses
         ):
             fault_loc = 1.0
 
@@ -155,12 +156,12 @@ def compute_metrics(
     coverage = chain_score_detail.get("coverage", 0.0)
 
     # contradiction handling: share of verified evidence that is not contradictory
-    total_ev = max(1, len(result.evidence))
+    total_ev = max(1, len(evidence))
     contra = sum(
         1
-        for h in result.hypotheses
+        for h in hypotheses
         for eid in h.contradiction_ids
-        if any(e.evidence_id == eid for e in result.evidence)
+        if any(e.evidence_id == eid for e in evidence)
     )
     contradiction_handling = max(0.0, 1.0 - (contra / total_ev))
 
@@ -203,7 +204,7 @@ def _chain_score_detail(hypothesis, graph, observations) -> dict[str, Any]:
     return {"coverage": coverage, "unsupported_links": unsupported, "chain_links": links}
 
 
-def _run_with_llm(scenario_id, llm, config, spec_aware=True):
+def _run_with_llm(scenario_id, llm, config):
     inputs = load_investigation_inputs(f"configs/scenarios/{scenario_id}.yaml")
     specs = load_subsystem_specs("configs/subsystems")
     graph = build_graph(
@@ -211,7 +212,6 @@ def _run_with_llm(scenario_id, llm, config, spec_aware=True):
         inputs.events,
         inputs.telemetry,
         specs,
-        spec_aware=spec_aware,
     )
     observations = extract_observations(inputs)
     start = time.perf_counter()
@@ -268,11 +268,19 @@ def _single_llm(scenario_id, llm, specs, config):
     return out.hypotheses, []
 
 
-def run_evaluation(scenarios=None, seeds=1, fake_llm=True, progress=None, no_llm_baseline=False):
+def run_evaluation(
+    scenarios=None,
+    seeds=1,
+    fake_llm=True,
+    progress=None,
+    no_llm_baseline=False,
+    mode="fake",
+):
     scenarios = scenarios or _discover_scenarios()
     progress = progress or (lambda s, m, f: None)
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
     config = ScoringConfig()
+    base_cfg = LLMConfig.from_env()
     rows = []
     total = len(scenarios) * seeds * (3 if not no_llm_baseline else 1)
     i = 0
@@ -286,7 +294,7 @@ def run_evaluation(scenarios=None, seeds=1, fake_llm=True, progress=None, no_llm
         specs = load_subsystem_specs("configs/subsystems")
         observations = extract_observations(inputs)
         graph = build_graph(
-            observations, inputs.events, inputs.telemetry, specs, spec_aware=True
+            observations, inputs.events, inputs.telemetry, specs
         )
         events = inputs.events
 
@@ -298,15 +306,25 @@ def run_evaluation(scenarios=None, seeds=1, fake_llm=True, progress=None, no_llm
             for seed in range(seeds):
                 i += 1
                 progress("eval", f"{sid}/{name} seed {seed}", i / total)
-                llm = LLMClient(LLMConfig(fake=fake_llm)) if use_llm else None
-                try:
-                    if name == "pipeline":
-                        scored, elapsed, g, obs, evs = _run_with_llm(
-                            sid, llm, config, spec_aware=True
+                if use_llm:
+                    if fake_llm:
+                        llm_cfg = LLMConfig(
+                            api_key=None,
+                            fake=True,
+                            cache_dir=base_cfg.cache_dir,
+                            requests_per_minute=base_cfg.requests_per_minute,
+                            tokens_per_minute=base_cfg.tokens_per_minute,
+                            tokens_per_day=base_cfg.tokens_per_day,
                         )
-                    elif name == "no_spec":
+                    else:
+                        llm_cfg = base_cfg  # from_env already reads GROQ_API_KEY
+                    llm = LLMClient(llm_cfg)
+                else:
+                    llm = None
+                try:
+                    if name == "pipeline" or name == "no_spec":
                         scored, elapsed, g, obs, evs = _run_with_llm(
-                            sid, llm, config, spec_aware=False
+                            sid, llm, config
                         )
                     elif name == "earliest_anomaly":
                         hyps, evs = _earliest_anomaly(sid, graph, observations, events)
@@ -333,11 +351,16 @@ def run_evaluation(scenarios=None, seeds=1, fake_llm=True, progress=None, no_llm
 
                 leading = scored.hypotheses[0] if scored.hypotheses else None
                 detail = _chain_score_detail(leading, g, observations)
-                result_type = type("R", (), {})()
-                result_type.hypotheses = scored.hypotheses
-                result_type.evidence = scored.evidence
                 metrics = compute_metrics(
-                    sid, result_type, ground_truth, observations, events, config, elapsed, detail
+                    sid,
+                    scored.hypotheses,
+                    scored.evidence,
+                    ground_truth,
+                    observations,
+                    events,
+                    config,
+                    elapsed,
+                    detail,
                 )
                 rows.append({
                     "scenario": sid, "variant": name, "seed": seed,
@@ -348,8 +371,13 @@ def run_evaluation(scenarios=None, seeds=1, fake_llm=True, progress=None, no_llm
     out = EVAL_DIR / "partial.json"
     out.write_text(json.dumps(rows, indent=2))
     aggregates = _aggregate(rows)
-    report = {"rows": rows, "aggregates": aggregates}
-    (EVAL_DIR / "results.json").write_text(json.dumps(report, indent=2))
+    report = {
+        "mode": mode,
+        "rows": rows,
+        "aggregates": aggregates,
+    }
+    results_path = EVAL_DIR / f"results.{mode}.json"
+    results_path.write_text(json.dumps(report, indent=2))
     return report
 
 
@@ -397,18 +425,22 @@ def main():
     ap.add_argument("--seeds", type=int, default=1)
     ap.add_argument("--no-llm-baseline", action="store_true")
     ap.add_argument("--fake-llm", action="store_true", default=True)
+    ap.add_argument("--real-llm", action="store_true", default=False)
     ap.add_argument("--json-out", dest="json_out", default=None)
     args = ap.parse_args()
+    mode = "real" if args.real_llm else "fake"
+    fake_llm = args.fake_llm and not args.real_llm
     report = run_evaluation(
         scenarios=args.scenarios,
         seeds=args.seeds,
-        fake_llm=args.fake_llm,
+        fake_llm=fake_llm,
         no_llm_baseline=args.no_llm_baseline,
+        mode=mode,
     )
     print_table(report)
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(report, indent=2))
-    print(f"\nSaved detailed results to {EVAL_DIR / 'results.json'}")
+    print(f"\nSaved detailed results to {EVAL_DIR / f'results.{mode}.json'}")
 
 
 if __name__ == "__main__":
