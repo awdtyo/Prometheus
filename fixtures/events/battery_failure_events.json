@@ -1,0 +1,247 @@
+[
+  {
+    "event_id": "evt_001",
+    "timestamp": "2026-03-14T08:00:00Z",
+    "subsystem": "obc",
+    "event_type": "mission_start",
+    "description": "Spacecraft completes initialization and begins nominal mission operations.",
+    "severity": "info",
+    "metadata": {
+      "mode": "nominal",
+      "met_seconds": 0
+    }
+  },
+  {
+    "event_id": "evt_002",
+    "timestamp": "2026-03-14T08:05:00Z",
+    "subsystem": "comms",
+    "event_type": "downlink_started",
+    "description": "Scheduled high-gain antenna downlink begins at 220 kbps.",
+    "severity": "info",
+    "metadata": {
+      "downlink_rate_kbps": 220,
+      "ground_station": "gs-north-1",
+      "met_seconds": 300
+    }
+  },
+  {
+    "event_id": "evt_003",
+    "timestamp": "2026-03-14T08:10:00Z",
+    "subsystem": "eps",
+    "event_type": "battery_cell_imbalance",
+    "description": "Battery cell 3 drifts outside the normal balancing band.",
+    "severity": "medium",
+    "metadata": {
+      "battery_cell": 3,
+      "cell_voltage_delta_mv": 38,
+      "met_seconds": 600
+    }
+  },
+  {
+    "event_id": "evt_004",
+    "timestamp": "2026-03-14T08:15:00Z",
+    "subsystem": "eps",
+    "event_type": "battery_degradation_onset",
+    "description": "Battery cell 3 internal resistance rises and terminal voltage begins an unexpected decline under load.",
+    "severity": "medium",
+    "metadata": {
+      "battery_cell": 3,
+      "internal_resistance_increase_ohm": 0.035,
+      "met_seconds": 900
+    }
+  },
+  {
+    "event_id": "evt_005",
+    "timestamp": "2026-03-14T08:24:00Z",
+    "subsystem": "eps",
+    "event_type": "battery_voltage_sag",
+    "description": "Battery terminal voltage crosses the 26.2 V warning threshold.",
+    "severity": "high",
+    "metadata": {
+      "battery_voltage_v": 26.16,
+      "threshold_v": 26.2,
+      "met_seconds": 1440
+    }
+  },
+  {
+    "event_id": "evt_006",
+    "timestamp": "2026-03-14T08:25:00Z",
+    "subsystem": "eps",
+    "event_type": "load_shedding_started",
+    "description": "EPS sheds 85 W of non-essential load to protect the main bus.",
+    "severity": "high",
+    "metadata": {
+      "shed_load_w": 85,
+      "met_seconds": 1500
+    }
+  },
+  {
+    "event_id": "evt_007",
+    "timestamp": "2026-03-14T08:25:30Z",
+    "subsystem": "tcs",
+    "event_type": "heater_power_shed",
+    "description": "Battery heater power is cut from 18 W to 8 W during load shedding.",
+    "severity": "medium",
+    "metadata": {
+      "heater_power_w": 8.24,
+      "previous_heater_power_w": 17.88,
+      "met_seconds": 1530
+    }
+  },
+  {
+    "event_id": "evt_008",
+    "timestamp": "2026-03-14T08:26:00Z",
+    "subsystem": "eps",
+    "event_type": "power_available_reduced",
+    "description": "Available power falls below the mission-operations allocation.",
+    "severity": "high",
+    "metadata": {
+      "available_power_w": 310,
+      "allocated_power_w": 420,
+      "met_seconds": 1560
+    }
+  },
+  {
+    "event_id": "evt_009",
+    "timestamp": "2026-03-14T08:27:00Z",
+    "subsystem": "tcs",
+    "event_type": "thermal_control_degraded",
+    "description": "Reduced heater and pump power let the thermal loop drift above its setpoint.",
+    "severity": "medium",
+    "metadata": {
+      "thermal_loop_temperature_c": 29.04,
+      "setpoint_c": 22.0,
+      "met_seconds": 1620
+    }
+  },
+  {
+    "event_id": "evt_010",
+    "timestamp": "2026-03-14T08:28:00Z",
+    "subsystem": "adcs",
+    "event_type": "attitude_control_degraded",
+    "description": "Reduced reaction-wheel torque authority pushes attitude error past 0.5 deg.",
+    "severity": "high",
+    "metadata": {
+      "attitude_error_deg": 0.63,
+      "threshold_deg": 0.5,
+      "met_seconds": 1680
+    }
+  },
+  {
+    "event_id": "evt_011",
+    "timestamp": "2026-03-14T08:30:00Z",
+    "subsystem": "comms",
+    "event_type": "transmitter_power_reduced",
+    "description": "Transmitter power is reduced from 10.5 W to 7.4 W to preserve the bus.",
+    "severity": "high",
+    "metadata": {
+      "transmitter_power_w": 7.43,
+      "previous_transmitter_power_w": 10.5,
+      "met_seconds": 1800
+    }
+  },
+  {
+    "event_id": "evt_012",
+    "timestamp": "2026-03-14T08:32:00Z",
+    "subsystem": "obc",
+    "event_type": "cpu_load_high",
+    "description": "Flight computer CPU load exceeds 75% while managing the power shortfall.",
+    "severity": "medium",
+    "metadata": {
+      "cpu_load_pct": 83.76,
+      "threshold_pct": 75.0,
+      "met_seconds": 1920
+    }
+  },
+  {
+    "event_id": "evt_013",
+    "timestamp": "2026-03-14T08:34:00Z",
+    "subsystem": "obc",
+    "event_type": "watchdog_reset",
+    "description": "A marginal bus triggers a flight computer watchdog reset.",
+    "severity": "high",
+    "metadata": {
+      "watchdog_reset_count": 1,
+      "reset_cause": "power_marginal",
+      "met_seconds": 2040
+    }
+  },
+  {
+    "event_id": "evt_014",
+    "timestamp": "2026-03-14T08:35:00Z",
+    "subsystem": "obc",
+    "event_type": "safe_mode_entered",
+    "description": "The onboard computer enters safe mode and sheds payload and non-essential loads.",
+    "severity": "critical",
+    "metadata": {
+      "mode": "safe",
+      "trigger": "bus_undervoltage",
+      "met_seconds": 2100
+    }
+  },
+  {
+    "event_id": "evt_015",
+    "timestamp": "2026-03-14T08:36:00Z",
+    "subsystem": "comms",
+    "event_type": "downlink_degraded",
+    "description": "Downlink rate falls to 64 kbps and signal-to-noise ratio approaches the critical threshold.",
+    "severity": "high",
+    "metadata": {
+      "downlink_rate_kbps": 64,
+      "signal_to_noise_db": 13.8,
+      "met_seconds": 2160
+    }
+  },
+  {
+    "event_id": "evt_016",
+    "timestamp": "2026-03-14T08:40:00Z",
+    "subsystem": "eps",
+    "event_type": "battery_critical",
+    "description": "Battery terminal voltage crosses the 24.8 V critical threshold.",
+    "severity": "critical",
+    "metadata": {
+      "battery_voltage_v": 24.74,
+      "threshold_v": 24.8,
+      "met_seconds": 2400
+    }
+  },
+  {
+    "event_id": "evt_017",
+    "timestamp": "2026-03-14T08:42:00Z",
+    "subsystem": "tcs",
+    "event_type": "battery_temperature_high",
+    "description": "Battery temperature crosses the 32 degC warning threshold.",
+    "severity": "high",
+    "metadata": {
+      "battery_temperature_c": 32.12,
+      "threshold_c": 32.0,
+      "met_seconds": 2520
+    }
+  },
+  {
+    "event_id": "evt_018",
+    "timestamp": "2026-03-14T08:45:00Z",
+    "subsystem": "obc",
+    "event_type": "mission_level_failure",
+    "description": "Mission operations declare a mission-level failure because payload downlink cannot be recovered in safe mode.",
+    "severity": "critical",
+    "metadata": {
+      "failed_objective": "payload_downlink",
+      "met_seconds": 2700
+    }
+  },
+  {
+    "event_id": "evt_019",
+    "timestamp": "2026-03-14T08:50:00Z",
+    "subsystem": "obc",
+    "event_type": "safe_mode_stable",
+    "description": "Safe mode stabilizes at a reduced power state with the battery above its state-of-charge critical limit.",
+    "severity": "high",
+    "metadata": {
+      "mode": "safe",
+      "bus_voltage_v": 24.2,
+      "state_of_charge_pct": 70.9,
+      "met_seconds": 3000
+    }
+  }
+]

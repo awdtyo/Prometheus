@@ -1,0 +1,75 @@
+id: obc
+name: Onboard Computing System
+description: >
+  Runs flight software, health monitoring, command sequencing, and safe-mode
+  logic. The OBC coordinates subsystem modes and is the final authority for
+  entering safe mode.
+
+monitored_parameters:
+  - name: cpu_load_pct
+    unit: "%"
+    nominal_min: 20.0
+    nominal_max: 60.0
+    warning_low: 10.0
+    warning_high: 75.0
+    critical_low: 5.0
+    critical_high: 90.0
+    description: Flight computer CPU utilization.
+
+  - name: cpu_temperature_c
+    unit: degC
+    nominal_min: 20.0
+    nominal_max: 45.0
+    warning_low: 10.0
+    warning_high: 55.0
+    critical_low: 0.0
+    critical_high: 65.0
+    description: Flight computer processor temperature.
+
+  - name: memory_utilization_pct
+    unit: "%"
+    nominal_min: 30.0
+    nominal_max: 70.0
+    warning_low: 20.0
+    warning_high: 80.0
+    critical_low: 10.0
+    critical_high: 90.0
+    description: Flight software memory utilization.
+
+  - name: watchdog_reset_count
+    unit: count
+    nominal_min: 0.0
+    nominal_max: 0.0
+    warning_low: null
+    warning_high: 1.0
+    critical_low: null
+    critical_high: 3.0
+    description: Cumulative watchdog resets since boot.
+
+dependencies:
+  - eps
+
+relevant_events:
+  - event_type: mission_start
+    description: Spacecraft completes initialization and begins nominal mission operations.
+    severity: info
+  - event_type: cpu_load_high
+    description: Flight computer load exceeds the warning threshold.
+    severity: medium
+  - event_type: watchdog_reset
+    description: Flight computer watchdog reset occurs.
+    severity: high
+  - event_type: safe_mode_entered
+    description: Spacecraft enters safe mode.
+    severity: critical
+  - event_type: mission_level_failure
+    description: Mission operations declare a mission-level failure.
+    severity: critical
+  - event_type: safe_mode_stable
+    description: Safe mode remains stable at a reduced power state.
+    severity: high
+
+expected_downstream_effects:
+  - High CPU load delays command processing and safe-mode response.
+  - Watchdog resets can interrupt ADCS and communications control.
+  - Safe mode sheds payload and non-essential loads, reducing downlink and science data.

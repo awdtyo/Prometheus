@@ -47,8 +47,8 @@ AI-generated hypotheses.
 │       ├── api/             # Typed HTTP client
 │       ├── components/      # Presentational components
 │       └── types/           # Wire types
-├── configs/                 # YAML subsystem and scenario definitions (YAML contracts TBD)
-├── fixtures/                # Synthetic telemetry and event-log samples (TBD)
+├── configs/                 # YAML subsystem and scenario definitions
+├── fixtures/                # Synthetic telemetry, event logs, and evaluation ground truth
 ├── docs/                    # Architecture, data contracts, API contract
 ├── tests/                   # Pytest suite and architecture guard
 └── scripts/                 # setup.sh, dev.sh, check.sh
@@ -148,6 +148,32 @@ Run the backend test suite with `python -m pytest tests -q`. See
 [`docs/api-contract.md`](docs/api-contract.md) for every route and payload and
 [`backend/README.md`](backend/README.md) for backend internals.
 
+## Demo data
+
+The repository ships a deterministic, **entirely synthetic** battery-voltage
+failure scenario. It is not real spacecraft telemetry. The demo includes:
+
+- Five subsystem specifications in `configs/subsystems/` (electrical power,
+  thermal control, ADCS, communications, onboard computing).
+- A scenario definition in `configs/scenarios/battery_failure.yaml`.
+- 1,403 telemetry samples in `fixtures/telemetry/`.
+- A 19-event log in JSON and CSV under `fixtures/events/`.
+- Evaluation-only ground truth in `fixtures/expected/`.
+
+The scenario runs from normal operation through battery degradation, a power
+warning, load shedding, downstream subsystem degradation, safe-mode entry, and a
+declared mission-level failure. The injected fault is a `power_degradation` on
+the electrical power system starting at MET 900 s.
+
+**Ground-truth boundary:** the file under `fixtures/expected/` must never be
+passed to hypothesis agents. The agent-facing aggregate is
+`InvestigationInputs`, which has no fault or ground-truth fields. Only
+`load_ground_truth()` reads the evaluation file.
+
+See [`fixtures/README.md`](fixtures/README.md) for file formats, the full
+timeline, generation assumptions, and loader examples. See
+[`configs/README.md`](configs/README.md) for the YAML contracts.
+
 ## Configuration
 
 All backend settings use the `MISSION_AUTOPSY_` prefix and are read from the
@@ -231,8 +257,14 @@ and planned request lifecycle.
 - Installable `mission-autopsy` package with a framework-independent domain
   skeleton and a `py.typed` marker.
 - Typed domain contracts in `autopsy/schemas/`: telemetry, events, observations,
-  evidence, hypotheses, graphs, run results, fault configuration, and
-  investigation configuration, with JSON round-trip tests.
+  evidence, hypotheses, graphs, run results, fault configuration, investigation
+  configuration, subsystem/scenario specifications, sanitized investigation
+  inputs, and evaluation-only ground truth, with JSON round-trip tests.
+- Strict ingestion loaders in `autopsy/ingest/` for subsystem YAML, scenario
+  YAML, telemetry CSV, event JSON/CSV, ground truth, and sanitized investigation
+  inputs.
+- Deterministic battery-failure demo data: five subsystem specs, one scenario,
+  1,403 telemetry samples, a 19-event log, and a 17-step causal ground truth.
 - FastAPI application factory, CORS, environment settings, structured logging,
   request IDs, centralized RFC 9457 errors, health endpoint, and OpenAPI docs.
 - Versioned `/api/v1` investigation, scenario, subsystem, fault-injection, and
@@ -248,7 +280,6 @@ and planned request lifecycle.
 
 ## What does not exist yet
 
-- Telemetry ingestion and YAML loaders (the contracts exist; the readers do not)
 - Scenario simulation
 - Causal graph algorithms
 - Hypothesis-generation agents and ranking
@@ -257,6 +288,7 @@ and planned request lifecycle.
 
 The backend's mock service is the integration point: replace it with an adapter
 around `autopsy` in `backend/services/factory.py` once the pipeline exists. The
-next domain step is to implement `autopsy/ingest/` against the frozen contracts
-in [`docs/data-contracts.md`](docs/data-contracts.md), then build the graph and
-simulation layers.
+next domain step is to build the graph and simulation layers against the frozen
+contracts in [`docs/data-contracts.md`](docs/data-contracts.md), using the
+battery-failure fixtures as the first end-to-end scenario, before adding
+investigation routes.

@@ -37,12 +37,16 @@ from autopsy.schemas.enums import (
     RunStatus,
     Severity,
 )
+from autopsy.schemas.evaluation import GroundTruth, GroundTruthStep
 from autopsy.schemas.events import MissionEvent
 from autopsy.schemas.evidence import Evidence
 from autopsy.schemas.graph import Graph, GraphEdge, GraphNode
 from autopsy.schemas.hypotheses import Hypothesis
+from autopsy.schemas.inputs import InvestigationInputs
 from autopsy.schemas.observations import Observation
 from autopsy.schemas.results import RunResult, RunTimestamps
+from autopsy.schemas.scenarios import InputPath, ScenarioFaultSpec, ScenarioSpec
+from autopsy.schemas.subsystems import EventSpec, ParameterSpec, SubsystemSpec
 from autopsy.schemas.telemetry import TelemetryRecord
 
 SCHEMA_VERSION = "1.0.0"
@@ -53,6 +57,7 @@ __all__ = [
     "AutopsyModel",
     "Description",
     "EntityId",
+    "EventSpec",
     "Evidence",
     "EvidenceStance",
     "EvidenceType",
@@ -61,22 +66,30 @@ __all__ = [
     "Graph",
     "GraphEdge",
     "GraphNode",
+    "GroundTruth",
+    "GroundTruthStep",
     "Hypothesis",
+    "InputPath",
     "InvestigationConfig",
+    "InvestigationInputs",
     "JsonObject",
     "Label",
     "MissionEvent",
     "NodeType",
     "Observation",
     "ParameterName",
+    "ParameterSpec",
     "RelationshipType",
     "RunResult",
     "RunStatus",
     "RunTimestamps",
+    "ScenarioFaultSpec",
+    "ScenarioSpec",
     "ScoringConfig",
     "Severity",
     "SourceId",
     "SubsystemId",
+    "SubsystemSpec",
     "TelemetryRecord",
     "TypeName",
     "Unit",

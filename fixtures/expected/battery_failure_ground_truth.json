@@ -1,0 +1,192 @@
+{
+  "scenario_id": "battery-failure",
+  "synthetic": true,
+  "injected_fault": {
+    "fault_type": "power_degradation",
+    "target_subsystem": "eps",
+    "start_time": "2026-03-14T08:15:00Z",
+    "duration_seconds": 2100.0,
+    "magnitude": 0.22,
+    "parameters": {
+      "battery_cell": 3,
+      "internal_resistance_increase_ohm": 0.035,
+      "initial_voltage_v": 28.6,
+      "degraded_voltage_v": 24.7,
+      "state_of_charge_at_fault_pct": 86.2
+    }
+  },
+  "expected_causal_sequence": [
+    {
+      "step": 1,
+      "timestamp": "2026-03-14T08:10:00Z",
+      "subsystem": "eps",
+      "event_type": "battery_cell_imbalance",
+      "description": "Battery cell 3 begins to drift out of balance; this is the earliest observable precursor, five minutes before the injected fault window opens.",
+      "evidence_ids": [
+        "evt_003"
+      ]
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-03-14T08:15:00Z",
+      "subsystem": "eps",
+      "event_type": "battery_degradation_onset",
+      "description": "The injected power_degradation fault begins on battery cell 3, raising internal resistance and reducing terminal voltage under load.",
+      "evidence_ids": [
+        "evt_004"
+      ]
+    },
+    {
+      "step": 3,
+      "timestamp": "2026-03-14T08:24:00Z",
+      "subsystem": "eps",
+      "event_type": "battery_voltage_sag",
+      "description": "Battery terminal voltage crosses the 26.2 V warning threshold as the degraded cell carries the bus load.",
+      "evidence_ids": [
+        "evt_005"
+      ]
+    },
+    {
+      "step": 4,
+      "timestamp": "2026-03-14T08:25:00Z",
+      "subsystem": "eps",
+      "event_type": "load_shedding_started",
+      "description": "EPS sheds 85 W of non-essential load to protect the main bus.",
+      "evidence_ids": [
+        "evt_006"
+      ]
+    },
+    {
+      "step": 5,
+      "timestamp": "2026-03-14T08:25:30Z",
+      "subsystem": "tcs",
+      "event_type": "heater_power_shed",
+      "description": "Battery heater power is cut from 18 W to 8 W as part of load shedding.",
+      "evidence_ids": [
+        "evt_007"
+      ]
+    },
+    {
+      "step": 6,
+      "timestamp": "2026-03-14T08:26:00Z",
+      "subsystem": "eps",
+      "event_type": "power_available_reduced",
+      "description": "Available power falls below the mission allocation, reducing the operating envelope for every downstream subsystem.",
+      "evidence_ids": [
+        "evt_008"
+      ]
+    },
+    {
+      "step": 7,
+      "timestamp": "2026-03-14T08:27:00Z",
+      "subsystem": "tcs",
+      "event_type": "thermal_control_degraded",
+      "description": "Reduced heater and pump power let the thermal loop drift above its setpoint.",
+      "evidence_ids": [
+        "evt_009"
+      ]
+    },
+    {
+      "step": 8,
+      "timestamp": "2026-03-14T08:28:00Z",
+      "subsystem": "adcs",
+      "event_type": "attitude_control_degraded",
+      "description": "Reaction-wheel torque authority is reduced and attitude error exceeds 0.5 deg.",
+      "evidence_ids": [
+        "evt_010"
+      ]
+    },
+    {
+      "step": 9,
+      "timestamp": "2026-03-14T08:30:00Z",
+      "subsystem": "comms",
+      "event_type": "transmitter_power_reduced",
+      "description": "Transmitter power is reduced from 10.5 W to 7.4 W to preserve the bus.",
+      "evidence_ids": [
+        "evt_011"
+      ]
+    },
+    {
+      "step": 10,
+      "timestamp": "2026-03-14T08:32:00Z",
+      "subsystem": "obc",
+      "event_type": "cpu_load_high",
+      "description": "The flight computer spends more time on power and mode management, and CPU load exceeds 75%.",
+      "evidence_ids": [
+        "evt_012"
+      ]
+    },
+    {
+      "step": 11,
+      "timestamp": "2026-03-14T08:34:00Z",
+      "subsystem": "obc",
+      "event_type": "watchdog_reset",
+      "description": "A marginal bus triggers a watchdog reset, interrupting attitude and communications control.",
+      "evidence_ids": [
+        "evt_013"
+      ]
+    },
+    {
+      "step": 12,
+      "timestamp": "2026-03-14T08:35:00Z",
+      "subsystem": "obc",
+      "event_type": "safe_mode_entered",
+      "description": "The onboard computer enters safe mode and sheds payload and non-essential loads.",
+      "evidence_ids": [
+        "evt_014"
+      ]
+    },
+    {
+      "step": 13,
+      "timestamp": "2026-03-14T08:36:00Z",
+      "subsystem": "comms",
+      "event_type": "downlink_degraded",
+      "description": "Downlink rate falls to 64 kbps and signal-to-noise ratio approaches the critical threshold.",
+      "evidence_ids": [
+        "evt_015"
+      ]
+    },
+    {
+      "step": 14,
+      "timestamp": "2026-03-14T08:40:00Z",
+      "subsystem": "eps",
+      "event_type": "battery_critical",
+      "description": "Battery terminal voltage crosses the 24.8 V critical threshold.",
+      "evidence_ids": [
+        "evt_016"
+      ]
+    },
+    {
+      "step": 15,
+      "timestamp": "2026-03-14T08:42:00Z",
+      "subsystem": "tcs",
+      "event_type": "battery_temperature_high",
+      "description": "Battery temperature crosses 32 degC while thermal control remains degraded.",
+      "evidence_ids": [
+        "evt_017"
+      ]
+    },
+    {
+      "step": 16,
+      "timestamp": "2026-03-14T08:45:00Z",
+      "subsystem": "obc",
+      "event_type": "mission_level_failure",
+      "description": "Mission operations declare a mission-level failure because payload downlink cannot be recovered in safe mode.",
+      "evidence_ids": [
+        "evt_018"
+      ]
+    },
+    {
+      "step": 17,
+      "timestamp": "2026-03-14T08:50:00Z",
+      "subsystem": "obc",
+      "event_type": "safe_mode_stable",
+      "description": "Safe mode stabilizes at a reduced power state, with the battery above the 20% state-of-charge critical limit.",
+      "evidence_ids": [
+        "evt_019"
+      ]
+    }
+  ],
+  "expected_terminal_state": "safe_mode",
+  "notes": "Evaluation-only data for the synthetic battery-failure demo. The injected fault is a 0.22-magnitude power degradation on battery cell 3 in the electrical power system, starting at MET 900 s (2026-03-14T08:15:00Z) and lasting 2100 s. The causal sequence is the graded expectation for root-cause and propagation analysis; never include this file in hypothesis-agent inputs."
+}

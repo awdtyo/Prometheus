@@ -1,0 +1,66 @@
+id: tcs
+name: Thermal Control System
+description: >
+  Maintains component temperatures using radiators, heat pipes, a pumped
+  thermal loop, and battery heaters. The battery thermal control loop is
+  tightly coupled to the electrical power budget.
+
+monitored_parameters:
+  - name: thermal_loop_temperature_c
+    unit: degC
+    nominal_min: 12.0
+    nominal_max: 30.0
+    warning_low: 5.0
+    warning_high: 35.0
+    critical_low: 0.0
+    critical_high: 40.0
+    description: Primary thermal control loop temperature.
+
+  - name: radiator_outlet_temperature_c
+    unit: degC
+    nominal_min: 5.0
+    nominal_max: 25.0
+    warning_low: -5.0
+    warning_high: 32.0
+    critical_low: -10.0
+    critical_high: 38.0
+    description: Radiator working-fluid outlet temperature.
+
+  - name: heater_power_w
+    unit: W
+    nominal_min: 0.0
+    nominal_max: 40.0
+    warning_low: null
+    warning_high: 55.0
+    critical_low: null
+    critical_high: 70.0
+    description: Total heater power draw.
+
+  - name: thermal_loop_pump_speed_pct
+    unit: "%"
+    nominal_min: 50.0
+    nominal_max: 80.0
+    warning_low: 40.0
+    warning_high: 90.0
+    critical_low: 30.0
+    critical_high: 95.0
+    description: Thermal loop pump command as a percentage of maximum speed.
+
+dependencies:
+  - eps
+
+relevant_events:
+  - event_type: thermal_control_degraded
+    description: Thermal control cannot hold the battery setpoint.
+    severity: medium
+  - event_type: battery_temperature_high
+    description: Battery temperature exceeds its warning threshold.
+    severity: high
+  - event_type: heater_power_shed
+    description: Heater power is reduced to preserve the main bus.
+    severity: medium
+
+expected_downstream_effects:
+  - Battery temperature rises as thermal control authority is reduced.
+  - Radiator outlet temperature and thermal loop temperature rise.
+  - Heater power is shed, which can cause cold-side temperatures to fall in other compartments.

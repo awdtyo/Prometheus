@@ -1,0 +1,85 @@
+id: eps
+name: Electrical Power System
+description: >
+  Generates, stores, regulates, and distributes electrical power. The main bus
+  supplies every other subsystem, and the battery carries the load through
+  eclipse and peak-demand periods.
+
+monitored_parameters:
+  - name: bus_voltage_v
+    unit: V
+    nominal_min: 27.8
+    nominal_max: 28.8
+    warning_low: 26.0
+    warning_high: 29.4
+    critical_low: 24.5
+    critical_high: 30.0
+    description: Regulated main bus voltage.
+
+  - name: battery_voltage_v
+    unit: V
+    nominal_min: 27.6
+    nominal_max: 29.0
+    warning_low: 26.2
+    warning_high: 29.6
+    critical_low: 24.8
+    critical_high: 30.2
+    description: Battery terminal voltage under the current load.
+
+  - name: battery_current_a
+    unit: A
+    nominal_min: -2.0
+    nominal_max: 6.0
+    warning_low: -3.0
+    warning_high: 8.0
+    critical_low: -4.0
+    critical_high: 10.0
+    description: Battery current; positive values discharge the battery.
+
+  - name: battery_temperature_c
+    unit: degC
+    nominal_min: 5.0
+    nominal_max: 25.0
+    warning_low: 0.0
+    warning_high: 32.0
+    critical_low: -5.0
+    critical_high: 38.0
+    description: Battery pack temperature.
+
+  - name: state_of_charge_pct
+    unit: "%"
+    nominal_min: 65.0
+    nominal_max: 100.0
+    warning_low: 40.0
+    warning_high: null
+    critical_low: 20.0
+    critical_high: null
+    description: Estimated battery state of charge.
+
+dependencies: []
+
+relevant_events:
+  - event_type: battery_cell_imbalance
+    description: Cell voltage spread exceeds the normal balancing band.
+    severity: medium
+  - event_type: battery_degradation_onset
+    description: Battery terminal voltage begins an unexpected decline under nominal load.
+    severity: medium
+  - event_type: battery_voltage_sag
+    description: Battery voltage falls below the warning threshold.
+    severity: high
+  - event_type: load_shedding_started
+    description: Non-essential loads are shed to preserve the main bus.
+    severity: high
+  - event_type: power_available_reduced
+    description: Available power drops below the mission-operations allocation.
+    severity: high
+  - event_type: battery_critical
+    description: Battery voltage falls below the critical threshold.
+    severity: critical
+
+expected_downstream_effects:
+  - Reduced bus voltage and available power propagate to every powered subsystem.
+  - Thermal control authority is reduced when heater and pump power are shed.
+  - ADCS actuator torque authority and communications transmitter power are curtailed.
+  - The onboard computer may reset or enter safe mode when bus voltage becomes marginal.
