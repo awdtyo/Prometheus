@@ -64,6 +64,7 @@ _COLUMN_MIGRATIONS: dict[str, str] = {
     "current_stage": "ALTER TABLE investigations ADD COLUMN current_stage TEXT",
     "error_message": "ALTER TABLE investigations ADD COLUMN error_message TEXT",
     "completed_at": "ALTER TABLE investigations ADD COLUMN completed_at TEXT",
+    "result_json": "ALTER TABLE investigations ADD COLUMN result_json TEXT",
 }
 
 
