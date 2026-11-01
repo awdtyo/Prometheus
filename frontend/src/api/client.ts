@@ -4,6 +4,7 @@ import type {
   ConnectionStatus,
   EvaluationMetrics,
   FaultConfig,
+  Graph,
   HealthResponse,
   HypothesisListResponse,
   InjectionPreview,
@@ -22,7 +23,7 @@ import type {
    ============================================================================= */
 
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-const apiBaseUrl = (configuredBaseUrl || "/api").replace(/\/+$/, "");
+const apiBaseUrl = (configuredBaseUrl ?? "/api").replace(/\/+$/, "");
 
 export const API_DOCS_URL =
   import.meta.env.VITE_API_DOCS_URL?.trim() || "http://127.0.0.1:8000/docs";
@@ -177,6 +178,144 @@ export function getTimeline(
     `/api/v1/investigations/${encodeURIComponent(investigationId)}/timeline`,
     signal,
   );
+}
+
+/** GET /api/v1/investigations/{investigation_id}/graph */
+export function getGraph(
+  investigationId: string,
+  signal?: AbortSignal,
+): Promise<Graph> {
+  return get<Graph>(
+    `/api/v1/investigations/${encodeURIComponent(investigationId)}/graph`,
+    signal,
+  );
+}
+
+/** GET /api/v1/evaluation/{scenario_id}?mode=fake|real */
+export function getEvaluation(
+  scenarioId: string,
+  mode?: "fake" | "real",
+  signal?: AbortSignal,
+): Promise<Record<string, number>> {
+  const params = new URLSearchParams();
+  if (mode) params.set("mode", mode);
+  const qs = params.toString();
+  return get<Record<string, number>>(
+    `/api/v1/evaluation/${encodeURIComponent(scenarioId)}${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/** GET /api/v1/demo/{scenario_id} */
+export function getDemo(
+  scenarioId: string,
+  signal?: AbortSignal,
+): Promise<{ run_result: any; progress_events: any[] }> {
+  return get<{ run_result: any; progress_events: any[] }>(
+    `/api/v1/demo/${encodeURIComponent(scenarioId)}`,
+    signal,
+  );
+}
+
+/** Subscribe to investigation progress via SSE with REST polling fallback. */
+export function subscribeToInvestigationProgress(
+  investigationId: string,
+  onEvent: (event: {
+    investigation_id: string;
+    status: string;
+    stage: string;
+    progress: number;
+    message: string;
+    timestamp: string;
+  }) => void,
+  onError?: (error: Error) => void,
+): { abort: () => void } {
+  const url = `${apiBaseUrl}/api/v1/investigations/${encodeURIComponent(investigationId)}/events`;
+  let controller: AbortController | null = null;
+  let eventSource: EventSource | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let aborted = false;
+
+  const stop = () => {
+    aborted = true;
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    if (controller) {
+      controller.abort();
+      controller = null;
+    }
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  const poll = () => {
+    if (aborted) return;
+    controller = new AbortController();
+    getInvestigation(investigationId, controller.signal)
+      .then((inv) => {
+        if (aborted) return;
+        onEvent({
+          investigation_id: inv.investigation_id,
+          status: inv.status,
+          stage: inv.current_stage ?? "",
+          progress: inv.progress,
+          message: inv.current_stage ?? "",
+          timestamp: inv.updated_at,
+        });
+        if (inv.status === "completed" || inv.status === "failed" || inv.status === "cancelled") {
+          stop();
+          return;
+        }
+        pollTimer = setTimeout(poll, 2000);
+      })
+      .catch((err) => {
+        if (aborted) return;
+        onError?.(err);
+        pollTimer = setTimeout(poll, 2000);
+      });
+  };
+
+  try {
+    eventSource = new EventSource(url);
+    eventSource.onopen = () => {
+      // SSE connected; poll fallback not needed.
+      pollTimer = null;
+    };
+    eventSource.onmessage = (ev) => {
+      if (aborted) return;
+      try {
+        const data = JSON.parse(ev.data);
+        onEvent({
+          investigation_id: data.investigation_id,
+          status: data.status,
+          stage: data.stage,
+          progress: data.progress,
+          message: data.message,
+          timestamp: data.timestamp,
+        });
+        if (data.status === "completed" || data.status === "failed" || data.status === "cancelled") {
+          stop();
+        }
+      } catch {
+        // ignore malformed SSE data
+      }
+    };
+    eventSource.onerror = () => {
+      eventSource?.close();
+      eventSource = null;
+      // Fall back to polling.
+      poll();
+    };
+  } catch {
+    // EventSource not available; fall back to polling.
+    poll();
+  }
+
+  return { abort: stop };
 }
 
 /** POST /api/v1/scenarios/{scenario_id}/inject */

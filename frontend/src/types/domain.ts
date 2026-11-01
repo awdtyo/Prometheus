@@ -197,3 +197,8 @@ export interface GraphEdge {
   dashed: boolean;
   metadata: JsonObject;
 }
+
+export interface Graph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}

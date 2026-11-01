@@ -11,6 +11,7 @@ persisted ``RunResult``.
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from collections.abc import Iterator
@@ -23,6 +24,8 @@ from autopsy.ingest.loaders import (
     load_subsystem_specs,
 )
 from autopsy.pipeline import run_scenario
+from autopsy.schemas.graph import Graph
+from autopsy.schemas.results import RunResult
 from autopsy.schemas.scenarios import ScenarioSpec
 from backend.db import investigations as inv_repo
 from backend.db import runs as run_repo
@@ -388,6 +391,34 @@ class AutopsyInvestigationService:
                 )
             ],
         )
+
+    # -------------------------------------------------------------------- graph
+    def graph(self, investigation_id: str) -> Graph:
+        """Return the causal/temporal graph for one investigation.
+
+        The graph is persisted as ``result_json`` when the pipeline completes;
+        fall back to an empty graph when no result has been stored yet.
+        """
+        self._require(investigation_id)
+        with self._lock:
+            result = self._results.get(investigation_id)
+        if result is not None:
+            return result.graph
+        result_json = self._get_result_json(investigation_id)
+        if result_json is None:
+            return Graph(nodes=[], edges=[])
+        result = RunResult.model_validate(json.loads(result_json))
+        return result.graph
+
+    def _get_result_json(self, investigation_id: str) -> dict[str, Any] | None:
+        with connect(self._database_path) as connection:
+            row = connection.execute(
+                "SELECT result_json FROM investigations WHERE id = ?",
+                (investigation_id,),
+            ).fetchone()
+        if row is None or row["result_json"] is None:
+            return None
+        return json.loads(row["result_json"])
 
     # -------------------------------------------------------------------- SSE
     def stream_progress(self, investigation_id: str) -> Iterator[ProgressEvent]:

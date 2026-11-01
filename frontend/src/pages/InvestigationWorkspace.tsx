@@ -1,8 +1,10 @@
+import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 
 import {
   useInvestigation,
   useTimeline,
+  subscribeToInvestigationProgress,
   problemFromError,
 } from "../api/client";
 import { Loading } from "../components/Loading";
@@ -17,6 +19,25 @@ export function InvestigationWorkspacePage() {
   const { data: timeline } = useTimeline(id ?? null);
 
   const events: TimelineEvent[] = timeline?.events ?? [];
+  const [progressEvents, setProgressEvents] = useState<{
+    investigation_id: string;
+    status: string;
+    stage: string;
+    progress: number;
+    message: string;
+    timestamp: string;
+  }[]>([]);
+
+  const eventSourceRef = useRef<{ abort: () => void } | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    const sub = subscribeToInvestigationProgress(id, (ev) => {
+      setProgressEvents((prev) => [...prev, ev]);
+    });
+    eventSourceRef.current = sub;
+    return () => sub.abort();
+  }, [id]);
 
   if (isLoading) return <Loading />;
   if (error) {
@@ -46,6 +67,8 @@ export function InvestigationWorkspacePage() {
     cancelled: "var(--faint)",
   };
 
+  const latestProgress = progressEvents[progressEvents.length - 1];
+
   return (
     <div style={pageStyles.container}>
       <nav style={pageStyles.breadcrumbs}>
@@ -70,6 +93,11 @@ export function InvestigationWorkspacePage() {
           <span style={pageStyles.progressText}>
             {investigation.progress}% complete
           </span>
+          {latestProgress && (
+            <span style={pageStyles.progressText}>
+              {" | " + latestProgress.stage + " (" + latestProgress.progress + "%)"}
+            </span>
+          )}
         </div>
       </div>
 
@@ -97,6 +125,24 @@ export function InvestigationWorkspacePage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {progressEvents.length > 0 && (
+          <div style={pageStyles.section}>
+            <h3 style={pageStyles.sectionTitle}>Progress events</h3>
+            <div style={pageStyles.timeline}>
+              {progressEvents.map((ev) => (
+                <div key={ev.timestamp} style={pageStyles.eventRow}>
+                  <div style={pageStyles.eventTime}>{ev.timestamp}</div>
+                  <div style={pageStyles.eventBody}>
+                    <strong>{ev.stage}</strong> — {ev.message}
+                    <br />
+                    <span style={pageStyles.severity}>[{ev.status} · {ev.progress}%]</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

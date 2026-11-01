@@ -11,6 +11,9 @@ import type {
   Severity,
   RunStatus,
   FaultType,
+  Graph,
+  GraphEdge,
+  GraphNode,
   JsonObject,
   EvaluationMetrics,
 } from "./domain";
@@ -123,6 +126,10 @@ export interface InvestigationCreate {
   title?: string | null;
   description?: string | null;
   metadata?: JsonObject;
+  /** Nested fault configuration (preferred over flat fault_type). */
+  fault_config?: FaultConfig;
+  agent_config?: AgentConfig;
+  scoring_config?: ScoringConfig;
 }
 
 /** One ranked causal explanation */
@@ -136,6 +143,7 @@ export interface Hypothesis {
   assumptions: string[];
   confidence: number;
   score: number;
+  metadata?: Record<string, any>;
 }
 
 export interface HypothesisListResponse {
@@ -250,3 +258,4 @@ export interface Problem {
    ------------------------------------------------------- */
 
 export type { EvaluationMetrics };
+export type { Graph, GraphEdge, GraphNode };

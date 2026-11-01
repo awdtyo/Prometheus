@@ -1,15 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Node } from "@xyflow/react";
 
 import { ReactFlow, Background, Controls } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
 
-import { useTimeline } from "../api/client";
-import { useScenario } from "../api/client";
-import { buildGraph } from "../lib/graph";
-import type { GraphNode } from "../lib/graph";
-import type { TimelineEvent } from "../types/api";
+import { getGraph } from "../api/client";
+import { useScenario as useScenarioDetail } from "../api/client";
+import type { GraphNode } from "../types/api";
 import type { SubsystemResponse } from "../types/api";
 
 export function CausalGraphPage() {
@@ -17,19 +15,73 @@ export function CausalGraphPage() {
   const investigationId = searchParams.get("inv") || null;
   const [selected, setSelected] = useState<GraphNode | null>(null);
 
-  const { data: timeline } = useTimeline(investigationId);
-  const { data: scenario } = useScenario(investigationId ? null : null);
-
-  const events: TimelineEvent[] = timeline?.events ?? [];
+  const { data: scenario } = useScenarioDetail(investigationId ? investigationId : null);
   const subsystems: SubsystemResponse[] = scenario?.subsystems ?? [];
 
-  const { nodes, edges } = buildGraph({ events, subsystems, width: 760 });
+  const [graph, setGraph] = useState<{ nodes: any[]; edges: any[] } | null>(null);
+
+  useEffect(() => {
+    if (!investigationId) {
+      setGraph(null);
+      return;
+    }
+    getGraph(investigationId)
+      .then((g) => setGraph(g as any))
+      .catch(() => setGraph(null));
+  }, [investigationId]);
+
+  const nodes: GraphNode[] = graph?.nodes.map((n) => ({
+    id: n.node_id,
+    label: n.label,
+    type: n.node_type as any,
+    subsystem: (n.metadata as Record<string, any> | undefined)?.subsystem,
+    timestamp: n.timestamp,
+    x: 0,
+    y: 0,
+    metadata: n.metadata,
+  })) ?? [];
+
+  const edges: { id: string; source: string; target: string; relationship_type: string; confidence: number; dashed: boolean; metadata: Record<string, any> }[] = graph?.edges.map((e) => ({
+    id: e.edge_id,
+    source: e.source,
+    target: e.target,
+    relationship_type: e.relationship_type,
+    confidence: e.confidence,
+    dashed: e.confidence < 0.5 || !(e.metadata as Record<string, any> | undefined)?.spec_allowed,
+    metadata: e.metadata,
+  })) ?? [];
+
+  const subsystemRows = subsystems.map((s, i) => ({ id: s.id, y: i }));
+  const rowFor = (subsystem: string | null) => {
+    if (!subsystem) return null;
+    const found = subsystemRows.find((r) => r.id === subsystem);
+    return found ? found.y : null;
+  };
+
+  const allTimes = nodes
+    .map((n) => (n.metadata as Record<string, any> | undefined)?.timestamp ? new Date((n.metadata as Record<string, any>).timestamp).getTime() : null)
+    .filter((t) => t !== null) as number[];
+  const tMin = allTimes.length ? Math.min(...allTimes) : Date.now();
+  const tMax = allTimes.length ? Math.max(...allTimes) : Date.now();
+  const span = tMax - tMin || 1;
+  const width = 760;
+  const xFor = (timestamp: string | null) => {
+    if (!timestamp) return 60;
+    const t = new Date(timestamp).getTime();
+    return 60 + ((t - tMin) / span) * (width - 120);
+  };
+
+  nodes.forEach((node) => {
+    const row = rowFor(node.subsystem as unknown as string | null);
+    node.y = row != null ? 40 + row * 70 : 40;
+    node.x = xFor((node.timestamp as unknown as string | null));
+  });
 
   const flowNodes: Node<{ graphNode: GraphNode }>[] = nodes.map((n) => ({
     id: n.id,
     position: { x: n.x, y: n.y },
     data: { label: n.label, graphNode: n },
-    style: nodeStyles[n.type],
+    style: nodeStyles[n.type as any],
   }));
 
   const flowEdges = edges.map((e) => ({
@@ -59,8 +111,8 @@ export function CausalGraphPage() {
       </div>
 
       <div style={pageStyles.graphArea}>
-        {events.length === 0 && !subsystems.length ? (
-          <div style={pageStyles.empty}>No graph data available for this investigation.</div>
+        {!investigationId ? (
+          <div style={pageStyles.empty}>Open an investigation to view its graph.</div>
         ) : (
           <ReactFlow
             nodes={flowNodes}

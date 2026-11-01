@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -9,37 +10,38 @@ import {
   Cell,
 } from "recharts";
 
-import { emptyEvaluationMetrics } from "../api/client";
+import { emptyEvaluationMetrics, getEvaluation } from "../api/client";
+import { Loading } from "../components/Loading";
 import type { EvaluationMetrics } from "../types/api";
 
 const METRIC_FIELDS: (keyof EvaluationMetrics)[] = [
   "root_cause_accuracy",
-  "runtime_seconds",
-  "evidence_weight",
-  "consistency_weight",
-  "coverage_weight",
-  "contradiction_penalty",
   "fault_localization_accuracy",
   "causal_chain_accuracy",
   "evidence_coverage",
   "temporal_ordering_accuracy",
   "contradiction_handling",
   "unsupported_claim_rate",
+  "runtime_seconds",
+  "evidence_weight",
+  "consistency_weight",
+  "coverage_weight",
+  "contradiction_penalty",
 ];
 
 const LABELS: Record<keyof EvaluationMetrics, string> = {
   root_cause_accuracy: "Root cause accuracy",
-  runtime_seconds: "Runtime (s)",
-  evidence_weight: "Evidence weight",
-  consistency_weight: "Consistency weight",
-  coverage_weight: "Coverage weight",
-  contradiction_penalty: "Contradiction penalty",
   fault_localization_accuracy: "Fault localization accuracy",
   causal_chain_accuracy: "Causal chain accuracy",
   evidence_coverage: "Evidence coverage",
   temporal_ordering_accuracy: "Temporal ordering accuracy",
   contradiction_handling: "Contradiction handling",
   unsupported_claim_rate: "Unsupported claim rate",
+  runtime_seconds: "Runtime (s)",
+  evidence_weight: "Evidence weight",
+  consistency_weight: "Consistency weight",
+  coverage_weight: "Coverage weight",
+  contradiction_penalty: "Contradiction penalty",
 };
 
 const COLORS = [
@@ -58,21 +60,77 @@ const COLORS = [
 ];
 
 export function EvaluationPage() {
-  const metrics = emptyEvaluationMetrics();
+  const [scenarioId] = (() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("scenario") ?? "battery_failure";
+  })();
+
+  const [mode, setMode] = useState<"fake" | "real">("fake");
+  const [metrics, setMetrics] = useState<Record<string, number> | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+    getEvaluation(scenarioId, mode)
+      .then((data) => {
+        if (!cancelled) {
+          setMetrics(data);
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err);
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scenarioId, mode]);
+
+  const metricsData = metrics ?? emptyEvaluationMetrics();
   const chartData = METRIC_FIELDS.map((key) => ({
     name: LABELS[key],
-    value: metrics[key],
+    value: metricsData[key],
   }));
+
+  if (isLoading) return <Loading />;
+  if (error) {
+    return (
+      <div style={pageStyles.container}>
+        <h1>Evaluation Dashboard</h1>
+        <p>Unable to load evaluation metrics.</p>
+        <p>{error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    );
+  }
+
+  const isFake = mode === "fake";
 
   return (
     <div style={pageStyles.container}>
       <h1>Evaluation Dashboard</h1>
-      <p style={pageStyles.note}>
-        The mock backend does not expose an evaluation-metrics endpoint yet, so no measured
-        values are available. The table below shows the 12-field
-        <code>EvaluationMetrics</code> shape per the contract, populated from the empty shape.
-        See "Backend mismatches" in the rebuild report.
-      </p>
+      <div style={pageStyles.modeBar}>
+        <span style={pageStyles.modeLabel}>LLM mode:</span>
+        <select
+          value={mode}
+          onChange={(e) => setMode((e.target.value as "fake" | "real") || "fake")}
+          style={pageStyles.modeSelect}
+        >
+          <option value="fake">Fake (offline, plumbing test)</option>
+          <option value="real">Real (live Groq LLM)</option>
+        </select>
+        {isFake && (
+          <span style={pageStyles.fakeNotice}>
+            ⚠ Fake-LLM numbers only test the plumbing — they are not an
+            assessment of root-cause quality.
+          </span>
+        )}
+      </div>
 
       <div style={pageStyles.tableWrap}>
         <table style={pageStyles.table}>
@@ -86,7 +144,7 @@ export function EvaluationPage() {
             {METRIC_FIELDS.map((key) => (
               <tr key={key} style={pageStyles.tr}>
                 <td style={pageStyles.td}>{LABELS[key]}</td>
-                <td style={pageStyles.tdValue}>{Number(metrics[key]).toFixed(3)}</td>
+                <td style={pageStyles.tdValue}>{Number(metricsData[key]).toFixed(3)}</td>
               </tr>
             ))}
           </tbody>
@@ -114,7 +172,28 @@ export function EvaluationPage() {
 
 const pageStyles: Record<string, React.CSSProperties> = {
   container: { padding: 24, color: "var(--text)", fontFamily: "system-ui, sans-serif" },
-  note: { margin: "0 0 16px", color: "var(--muted)", fontSize: 0.85, fontFamily: "var(--mono)" },
+  modeBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 24,
+    padding: 16,
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+  },
+  modeLabel: { fontSize: 0.85, fontFamily: "var(--mono)", color: "var(--muted)", marginRight: 8 },
+  modeSelect: { padding: "6px 10px", borderRadius: 4, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 0.85 },
+  fakeNotice: {
+    marginLeft: 16,
+    fontSize: 0.8,
+    fontFamily: "var(--mono)",
+    color: "var(--accent-foreground)",
+    background: "rgba(240, 165, 43, 0.1)",
+    padding: "6px 10px",
+    borderRadius: 4,
+    border: "1px solid var(--accent)",
+  },
   tableWrap: { overflowX: "auto", marginBottom: 24 },
   table: { width: "100%", borderCollapse: "collapse" },
   th: {

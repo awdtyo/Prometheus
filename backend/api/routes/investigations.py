@@ -16,6 +16,7 @@ from backend.schemas.investigation import (
     ProgressEvent,
     TimelineResponse,
 )
+from autopsy.schemas.graph import Graph
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
 
@@ -100,6 +101,19 @@ def get_timeline(
 ) -> TimelineResponse:
     """Return the reconstructed event timeline in chronological order."""
     return service.timeline(investigation_id)
+
+
+@router.get(
+    "/{investigation_id}/graph",
+    response_model=Graph,
+    summary="Read the reconstructed causal/temporal graph",
+)
+def get_graph(
+    investigation_id: str,
+    service: InvestigationServiceDep,
+) -> Graph:
+    """Return the causal and temporal graph for one investigation."""
+    return service.graph(investigation_id)
 
 
 @router.get(

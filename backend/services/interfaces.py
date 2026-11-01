@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from typing import Protocol
 
+from autopsy.schemas.graph import Graph
 from backend.schemas.catalog import (
     FaultConfig,
     ScenarioDetailResponse,
@@ -41,7 +42,11 @@ class InvestigationService(Protocol):
         ...
 
     def timeline(self, investigation_id: str) -> TimelineResponse:
-        """Return the reconstructed timeline for an investigation."""
+        """Return the reconstructed event timeline for an investigation."""
+        ...
+
+    def graph(self, investigation_id: str) -> Graph:
+        """Return the causal/temporal graph for one investigation."""
         ...
 
     def stream_progress(self, investigation_id: str) -> Iterator[ProgressEvent]:
