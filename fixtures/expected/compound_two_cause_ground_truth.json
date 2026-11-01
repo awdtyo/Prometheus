@@ -1,0 +1,50 @@
+{
+  "scenario_id": "compound_two_cause",
+  "synthetic": true,
+  "injected_fault": {
+    "fault_type": "power_degradation",
+    "target_subsystem": "eps",
+    "start_time": "2026-03-14T08:10:00+00:00",
+    "duration_seconds": 2400.0,
+    "magnitude": 0.4,
+    "parameters": {
+      "root_cause": "compound: battery_cell_imbalance + heater_stuck_on",
+      "affected_parameter": "bus_voltage_v",
+      "secondary_fault": "thermal_overheat",
+      "secondary_target": "tcs"
+    }
+  },
+  "expected_causal_sequence": [
+    {
+      "step": 1,
+      "timestamp": "2026-03-14T08:10:00+00:00",
+      "subsystem": "eps",
+      "event_type": "battery_cell_imbalance",
+      "description": "First cause: battery cell imbalance sags the bus.",
+      "evidence_ids": [
+        "evt_001"
+      ]
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-03-14T08:30:00+00:00",
+      "subsystem": "tcs",
+      "event_type": "heater_stuck_on",
+      "description": "Second cause: heater stuck on adds thermal load.",
+      "evidence_ids": [
+        "evt_002"
+      ]
+    },
+    {
+      "step": 3,
+      "timestamp": "2026-03-14T08:40:00+00:00",
+      "subsystem": "tcs",
+      "event_type": "thermal_overheat_critical",
+      "description": "Combined load pushes thermal loop critical.",
+      "evidence_ids": [
+        "evt_003"
+      ]
+    }
+  ],
+  "expected_terminal_state": "mission_failure"
+}

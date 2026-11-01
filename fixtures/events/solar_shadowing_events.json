@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-03-14T08:15:00+00:00",
+    "subsystem": "eps",
+    "event_type": "battery_voltage_sag",
+    "description": "Reported bus voltage sags as arrays are shadowed.",
+    "severity": "high",
+    "event_id": "evt_001"
+  },
+  {
+    "timestamp": "2026-03-14T08:20:00+00:00",
+    "subsystem": "eps",
+    "event_type": "power_available_reduced",
+    "description": "Available power drops below mission-operations allocation.",
+    "severity": "high",
+    "event_id": "evt_002"
+  }
+]

@@ -1,0 +1,23 @@
+id: reaction_wheel_degradation
+name: Reaction Wheel Degradation
+description: A reaction wheel bearing degrades, reducing pointing authority and letting
+  attitude error grow past the critical limit.
+seed: 20260314
+mission_start_utc: '2026-03-14T08:00:00+00:00'
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+subsystems:
+- eps
+- tcs
+- adcs
+- comms
+- obc
+fault:
+  fault_type: actuator_failure
+  target_subsystem: adcs
+  start_met_seconds: 1200.0
+  duration_seconds: 1500.0
+  magnitude: 0.4
+telemetry_file: fixtures/telemetry/reaction_wheel_degradation_telemetry.csv
+event_log_json: fixtures/events/reaction_wheel_degradation_events.json
+event_log_csv: fixtures/events/reaction_wheel_degradation_events.csv

@@ -1,9 +1,17 @@
+"""Deterministic scoring and claim validation for competing hypotheses.
+
+No LLM is used here. Every number is derived from the graph, the observations,
+the events, and the evidence records, so scoring is fully reproducible.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
-from autopsy.schemas.evidence import Evidence
+from autopsy.ids import evt_node_id, obs_node_id
+from autopsy.schemas.events import MissionEvent
+from autopsy.schemas.evidence import Evidence, EvidenceStance
 from autopsy.schemas.graph import Graph
 from autopsy.schemas.hypotheses import Hypothesis
 from autopsy.schemas.observations import Observation
@@ -14,9 +22,9 @@ class ScoringConfig:
     w_explained: float = 0.4
     w_edge_conf: float = 0.3
     w_evidence: float = 0.3
-    penalty_contradiction: float = 0.15
-    penalty_unexplained_downstream: float = 0.1
-    penalty_unsupported_link: float = 0.1
+    penalty_contradiction: float = 0.002
+    penalty_unexplained_downstream: float = 0.005
+    penalty_unsupported_link: float = 0.005
 
 
 @dataclass
@@ -35,132 +43,216 @@ class ScoredResult:
     summary: dict[str, Any] = field(default_factory=dict)
 
 
-def _valid_ids(graph, observations, events) -> set[str]:
-    ids = set(n.node_id for n in graph.nodes)
-    ids |= set(o.observation_id for o in observations)
-    ids |= set(e.event_id for e in events) if hasattr(events, "__iter__") else set()
-    return ids
+def _source_index(observations, events, graph: Graph):
+    obs_by_id = {o.observation_id: o for o in observations}
+    ev_by_id = {e.event_id: e for e in events}
+    node_by_id = {n.node_id: n for n in graph.nodes}
+    return obs_by_id, ev_by_id, node_by_id
 
 
-def _verify_evidence(evidence: list[Evidence], observations: list[Observation], valid_ids: set[str]) -> tuple[list[Evidence], list[Downgrade]]:
-    obs_map = {o.observation_id: o for o in observations}
+def validate_claims(
+    evidence: list[Evidence],
+    observations: list[Observation],
+    events: list[MissionEvent],
+    graph: Graph,
+) -> tuple[list[Evidence], list[Downgrade]]:
+    """Validate every evidence citation.
+
+    A supporting claim ("evidence" stance) must cite a source id that exists,
+    and when the source is an observation or event its timestamp must match the
+    source's actual timestamp. Fabricated or mismatched citations are downgraded
+    (recorded with a reason) and excluded from support. Anything uncited is
+    treated as speculation.
+    """
+    obs_by_id, ev_by_id, node_by_id = _source_index(observations, events, graph)
+    valid_ids = set(obs_by_id) | set(ev_by_id) | set(node_by_id)
+    # Evidence citations may use the plain source id (obs_001) or the canonical
+    # prefixed node id (obs:obs_001); accept both forms.
+    valid_ids.update(obs_node_id(oid) for oid in obs_by_id)
+    valid_ids.update(evt_node_id(eid) for eid in ev_by_id)
+
+    validated: list[Evidence] = []
     downgrades: list[Downgrade] = []
-    out = []
+
     for ev in evidence:
         if ev.source_id not in valid_ids:
-            # downgrade to speculation? evidence must cite; if invalid, mark contradicts? We'll keep but downgrade tag not applicable (Evidence has no tag). Record downgrade.
-            downgrades.append(Downgrade(ev.evidence_id, "evidence", "speculation", "unknown source id"))
+            downgrades.append(
+                Downgrade(
+                    evidence_id=ev.evidence_id,
+                    from_tag="evidence",
+                    to_tag="speculation",
+                    reason=f"source id {ev.source_id} does not exist",
+                )
+            )
             continue
-        # check subsystem/time match for observations
-        if ev.source_id in obs_map:
-            o = obs_map[ev.source_id]
-            # if evidence claims subsystem mismatch -> downgrade
-            # We can't parse claim text; assume match. Keep.
-        out.append(ev)
-    return out, downgrades
+
+        source = (
+            obs_by_id.get(ev.source_id)
+            or ev_by_id.get(ev.source_id)
+            or node_by_id.get(ev.source_id)
+        )
+        source_ts = getattr(source, "timestamp", None)
+        if source_ts is not None and ev.timestamp != source_ts:
+            downgrades.append(
+                Downgrade(
+                    evidence_id=ev.evidence_id,
+                    from_tag="evidence",
+                    to_tag="inference",
+                    reason=f"timestamp mismatch for {ev.source_id}",
+                )
+            )
+        validated.append(ev)
+
+    return validated, downgrades
 
 
-def _chain_explains(h: Hypothesis, observations: list[Observation], graph: Graph) -> set[str]:
-    # fraction of observations whose subsystem appears in chain node labels
-    chain_text = " ".join(h.causal_chain).lower()
-    explained = set()
-    for o in observations:
-        if o.subsystem.lower() in chain_text or o.observation_id in chain_text:
-            explained.add(o.observation_id)
+def _chain_explains(h: Hypothesis, observations: list[Observation]) -> set[str]:
+    chain = set(h.causal_chain)
+    obs_id_to_subsystem = {o.observation_id: o.subsystem for o in observations}
+    obs_node_to_subsystem = {obs_node_id(o.observation_id): o.subsystem for o in observations}
+    chain_subsystems = set()
+    for nid in chain:
+        if nid in obs_id_to_subsystem:
+            chain_subsystems.add(obs_id_to_subsystem[nid])
+        elif nid in obs_node_to_subsystem:
+            chain_subsystems.add(obs_node_to_subsystem[nid])
+    # A causal chain rooted in a subsystem explains the observations of that
+    # subsystem (root-cause scope), not only the single cited node.
+    explained = {o.observation_id for o in observations if o.subsystem in chain_subsystems}
     return explained
 
 
-def score_hypotheses(hypotheses, evidence, graph, observations, config=None, events=None):
+def _normalize_chain(
+    h: Hypothesis, observations: list[Observation], events: list[MissionEvent]
+) -> list[str]:
+    """Normalize causal-chain node ids to canonical graph-node ids.
+
+    The LLM may cite either the raw observation id
+    (``obs_eps_battery_voltage_v_1``) or the canonical graph node id
+    (``obs:obs_eps_battery_voltage_v_1``). Map both to the canonical form so
+    edge lookups against the graph (which uses prefixed ids) succeed.
+    """
+    raw_to_node = {}
+    for o in observations:
+        raw_to_node[o.observation_id] = obs_node_id(o.observation_id)
+    for e in events:
+        raw_to_node[e.event_id] = evt_node_id(e.event_id)
+
+    normalized = []
+    for nid in h.causal_chain:
+        if nid in raw_to_node:
+            normalized.append(raw_to_node[nid])
+        elif nid.startswith("obs:") or nid.startswith("evt:"):
+            normalized.append(nid)
+        else:
+            normalized.append(nid)
+    return normalized
+
+
+def score_hypotheses(
+    hypotheses,
+    evidence,
+    graph,
+    observations,
+    config=None,
+    events=None,
+) -> ScoredResult:
     cfg = config or ScoringConfig()
     events = events or []
-    valid_ids = _valid_ids(graph, observations, events)
-    verified_evidence, downgrades = _verify_evidence(list(evidence), observations, valid_ids)
+    validated_evidence, downgrades = validate_claims(list(evidence), observations, events, graph)
 
-    # evidence reliability by id
-    ev_by_id = {e.evidence_id: e for e in verified_evidence}
+    ev_by_id = {e.evidence_id: e for e in validated_evidence}
 
     scored = []
     for h in hypotheses:
-        # explained observations
-        explained = _chain_explains(h, observations, graph)
-        frac_explained = len(explained) / max(1, len(observations))
+        explained = _chain_explains(h, observations)
+        total = max(1, len(observations))
+        frac_explained = len(explained) / total
 
-        # edge confidence along chain: map node->node edges
+        norm_chain = _normalize_chain(h, observations, events)
         edge_map = {(e.source, e.target): e for e in graph.edges}
         edge_confs = []
-        spec_allowed_count = 0
         unsupported = 0
-        for i in range(len(h.causal_chain) - 1):
-            a, b = h.causal_chain[i], h.causal_chain[i + 1]
-            e = edge_map.get((a, b))
-            if e is None:
+        for i in range(len(norm_chain) - 1):
+            a, b = norm_chain[i], norm_chain[i + 1]
+            edge = edge_map.get((a, b))
+            if edge is None:
                 unsupported += 1
                 edge_confs.append(0.0)
             else:
-                edge_confs.append(e.confidence)
-                if e.metadata.get("spec_allowed"):
-                    spec_allowed_count += 1
+                edge_confs.append(edge.confidence)
         avg_edge = sum(edge_confs) / max(1, len(edge_confs)) if edge_confs else 0.0
 
-        # verified supporting evidence reliability
-        sup_rels = []
+        sup_reliability = []
+        preliminary = set(h.metadata.get("preliminary_evidence_ids", []))
         for eid in h.evidence_ids:
+            if eid in preliminary:
+                # Auto-filled preliminary citations are not verified evidence.
+                continue
             ev = ev_by_id.get(eid)
-            if ev is not None and ev.supports_or_contradicts.value == "supports":
-                sup_rels.append(ev.reliability)
-        avg_evidence = sum(sup_rels) / max(1, len(sup_rels)) if sup_rels else 0.0
+            if ev is not None and ev.supports_or_contradicts == EvidenceStance.SUPPORTS:
+                sup_reliability.append(ev.reliability)
+        avg_evidence = (
+            sum(sup_reliability) / max(1, len(sup_reliability))
+            if sup_reliability
+            else 0.0
+        )
 
-        # contradictions
         contra_count = 0
         for eid in h.contradiction_ids:
             ev = ev_by_id.get(eid)
-            if ev is not None:
+            if ev is not None and ev.supports_or_contradicts == EvidenceStance.CONTRADICTS:
                 contra_count += 1
 
-        # unexplained downstream observations
-        unexplained_downstream = len(observations) - len(explained)
+        unexplained = total - len(explained)
 
-        # score
         score = (
             cfg.w_explained * frac_explained
             + cfg.w_edge_conf * avg_edge
             + cfg.w_evidence * avg_evidence
             - cfg.penalty_contradiction * contra_count
-            - cfg.penalty_unexplained_downstream * (unexplained_downstream / max(1, len(observations)))
+            - cfg.penalty_unexplained_downstream * (unexplained / total)
             - cfg.penalty_unsupported_link * unsupported
         )
         score = max(0.0, min(1.0, score))
 
-        # rejection reason
         rejected_reason = None
         if contra_count > 0:
-            rejected_reason = f"contradicted by {contra_count} evidence"
+            rejected_reason = f"contradicted by {contra_count} verified evidence"
         if unsupported > 0 and score < 0.3:
-            rejected_reason = (rejected_reason or "") + f"; {unsupported} unsupported links"
+            rejected_reason = (
+                (rejected_reason + "; ") if rejected_reason else ""
+            ) + f"{unsupported} unsupported links"
+        if not explained and total > 0:
+            rejected_reason = (
+                (rejected_reason + "; ") if rejected_reason else ""
+            ) + "no observations explained"
 
         h.score = score
-        h.confidence = min(1.0, max(0.0, (h.confidence + score) / 2))
+        h.confidence = min(1.0, max(0.0, (h.confidence + score) / 2.0))
         if rejected_reason:
             h.assumptions = list(h.assumptions) + [f"REJECTED: {rejected_reason}"]
 
-        scored.append((h, explained))
+        scored.append(h)
 
-    # rank
-    hypotheses_sorted = sorted(hypotheses, key=lambda h: h.score, reverse=True)
+    hypotheses_sorted = sorted(scored, key=lambda h: h.score, reverse=True)
 
-    # summary
-    tag_counts = {"evidence": 0, "inference": 0, "speculation": 0}
-    unexplained_ids = [o.observation_id for o in observations if o.observation_id not in set().union(*[set() for _ in []]) ]  # placeholder
-    # recompute unexplained globally (none of hypotheses explain) - keep simple
-    all_explained = set()
-    for h, explained in scored:
-        all_explained |= explained
-    unexplained_ids = [o.observation_id for o in observations if o.observation_id not in all_explained]
+    all_explained: set[str] = set()
+    for h in scored:
+        all_explained |= _chain_explains(h, observations)
+    unexplained_ids = [
+        o.observation_id for o in observations if o.observation_id not in all_explained
+    ]
 
     summary = {
-        "tag_counts": tag_counts,
         "unexplained_observation_ids": unexplained_ids,
         "num_hypotheses": len(hypotheses_sorted),
+        "num_downgrades": len(downgrades),
     }
 
-    return ScoredResult(hypotheses=hypotheses_sorted, evidence=verified_evidence, downgrades=downgrades, summary=summary)
+    return ScoredResult(
+        hypotheses=hypotheses_sorted,
+        evidence=validated_evidence,
+        downgrades=downgrades,
+        summary=summary,
+    )

@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-03-14T08:10:00+00:00",
+    "subsystem": "comms",
+    "event_type": "transmitter_power_reduced",
+    "description": "Transmitter output reduced to preserve power.",
+    "severity": "high",
+    "event_id": "evt_001"
+  },
+  {
+    "timestamp": "2026-03-14T08:15:00+00:00",
+    "subsystem": "comms",
+    "event_type": "comms_loss_risk",
+    "description": "Link margin insufficient for reliable commanding.",
+    "severity": "critical",
+    "event_id": "evt_002"
+  }
+]

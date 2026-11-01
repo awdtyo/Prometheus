@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-03-14T08:35:00+00:00",
+    "subsystem": "adcs",
+    "event_type": "attitude_control_degraded",
+    "description": "Attitude error exceeds nominal pointing limit.",
+    "severity": "high",
+    "event_id": "evt_001"
+  },
+  {
+    "timestamp": "2026-03-14T08:37:30+00:00",
+    "subsystem": "adcs",
+    "event_type": "reaction_wheel_saturation",
+    "description": "Reaction wheel speed approaches saturation.",
+    "severity": "high",
+    "event_id": "evt_002"
+  }
+]

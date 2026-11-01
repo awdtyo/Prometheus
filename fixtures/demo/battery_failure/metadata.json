@@ -1,0 +1,16 @@
+{
+  "mode": "real",
+  "provider": "groq",
+  "models": {
+    "reasoning": "openai/gpt-oss-120b",
+    "fast": "openai/gpt-oss-20b",
+    "alt": "qwen/qwen3.8-27b"
+  },
+  "tokens_in": 19310,
+  "tokens_out": 8725,
+  "calls": 9,
+  "duration_seconds": 481.47,
+  "recorded_at": "2026-11-01T16:10:31.859078+00:00",
+  "scenario": "battery_failure",
+  "note": "real-recorded demo; fake variant under fixtures/demo/fake/"
+}

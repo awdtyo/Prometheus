@@ -1,0 +1,23 @@
+id: decoy_sensor_bias
+name: Bus Voltage Sensor Bias (Decoy)
+description: The bus voltage sensor reports a false low reading while the actual power
+  hardware is healthy; a decoy for a real power fault.
+seed: 20260314
+mission_start_utc: '2026-03-14T08:00:00+00:00'
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+subsystems:
+- eps
+- tcs
+- adcs
+- comms
+- obc
+fault:
+  fault_type: sensor_drift
+  target_subsystem: eps
+  start_met_seconds: 900.0
+  duration_seconds: 1200.0
+  magnitude: 0.25
+telemetry_file: fixtures/telemetry/decoy_sensor_bias_telemetry.csv
+event_log_json: fixtures/events/decoy_sensor_bias_events.json
+event_log_csv: fixtures/events/decoy_sensor_bias_events.csv

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 from autopsy.agents.models import (
     AgentError,
@@ -15,12 +14,7 @@ from autopsy.agents.models import (
 from autopsy.llm.client import LLMClient
 from autopsy.llm.config import ModelName
 from autopsy.schemas.evidence import Evidence
-from autopsy.schemas.graph import Graph
 from autopsy.schemas.hypotheses import Hypothesis
-from autopsy.schemas.observations import Observation
-from autopsy.schemas.events import MissionEvent
-from autopsy.schemas.subsystems import SubsystemSpec
-
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -50,7 +44,16 @@ def _context_for(graph, observations, events, specs) -> str:
     else:
         for s in specs:
             specfacts.append(f"{s.id}: deps={s.dependencies}")
-    return "NODES:\n" + "\n".join(nodes) + "\nOBS:\n" + "\n".join(obs) + "\nEVENTS:\n" + "\n".join(evs) + "\nSPECS:\n" + "\n".join(specfacts)
+    return (
+        "NODES:\n"
+        + "\n".join(nodes)
+        + "\nOBS:\n"
+        + "\n".join(obs)
+        + "\nEVENTS:\n"
+        + "\n".join(evs)
+        + "\nSPECS:\n"
+        + "\n".join(specfacts)
+    )
 
 
 def _validate_ids(obj, valid_ids: set[str]):
@@ -59,37 +62,68 @@ def _validate_ids(obj, valid_ids: set[str]):
         for nid in obj.causal_chain:
             if nid not in valid_ids:
                 raise ValueError(f"unknown id {nid}")
-    if isinstance(obj, Evidence):
-        if obj.source_id not in valid_ids:
-            raise ValueError(f"unknown source_id {obj.source_id}")
+    if isinstance(obj, Evidence) and obj.source_id not in valid_ids:
+        raise ValueError(f"unknown source_id {obj.source_id}")
 
 
-def generate_hypotheses(graph, observations, events, specs, llm, config=None, progress=None) -> tuple[list[Hypothesis], list[Evidence]]:
+def generate_hypotheses(
+    graph,
+    observations,
+    events,
+    specs,
+    llm,
+    config=None,
+    progress=None,
+) -> tuple[list[Hypothesis], list[Evidence]]:
     cfg = config or AgentConfig()
     progress = progress or (lambda s, m, f: None)
-    client = llm if isinstance(llm, LLMClient) else LLMClient() if False else None
-    # llm may be LLMClient or have complete_json
-    if not hasattr(llm, "complete_json"):
-        client = LLMClient()
-    else:
-        client = llm
+    client = llm if hasattr(llm, "complete_json") else LLMClient()
 
-    valid_ids = set(n.node_id for n in graph.nodes) | set(o.observation_id for o in observations) | set(e.event_id for e in events)
+    valid_ids = (
+        set(n.node_id for n in graph.nodes)
+        | set(o.observation_id for o in observations)
+        | set(e.event_id for e in events)
+    )
 
     ctx = _context_for(graph, observations, events, specs)
     calls = {"n": 0}
 
-    def call(model, system, user, rmodel, max_tokens=1024):
+    def call(model, system, user, rmodel, max_tokens=4096):
         if calls["n"] >= cfg.max_llm_calls:
             raise AgentError("budget exceeded")
         calls["n"] += 1
-        return client.complete_json(model=model, system=system, user=user, response_model=rmodel, max_tokens=max_tokens)
+        return client.complete_json(
+            model=model,
+            system=system,
+            user=user,
+            response_model=rmodel,
+            max_tokens=max_tokens,
+        )
 
     # Proposer
     progress("proposing", "Proposing hypotheses", 0.1)
     proposer_prompt = _load_prompt("proposer.md")
     proposer_out = call(ModelName.REASONING, proposer_prompt, ctx, ProposerOutput)
     hyps = proposer_out.hypotheses
+
+    # Safety net: every hypothesis must cite at least one supporting evidence id
+    # (schema requires non-empty evidence_ids). If the proposer left them empty,
+    # cite the first node of its causal chain as preliminary evidence and mark it
+    # so the judge does not count it as verified supporting evidence.
+    for h in hyps:
+        if not h.evidence_ids and h.causal_chain:
+            h.evidence_ids = [h.causal_chain[0]]
+            h.metadata.setdefault("preliminary_evidence_ids", []).append(h.causal_chain[0])
+
+    # Keep only causal-chain node ids that actually exist in the provided
+    # context; drop hypotheses whose chain collapses to nothing valid.
+    valid_chain: list[Hypothesis] = []
+    for h in hyps:
+        kept = [nid for nid in h.causal_chain if nid in valid_ids]
+        if kept:
+            h.causal_chain = kept
+            valid_chain.append(h)
+    hyps = valid_chain
 
     all_evidence: list[Evidence] = []
 

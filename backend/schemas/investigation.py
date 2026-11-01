@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import Field, computed_field
 
 from backend.schemas.base import ApiModel, UtcDatetime
+from backend.schemas.catalog import FaultConfig
 
 
 class InvestigationStatus(StrEnum):
@@ -25,6 +26,10 @@ class InvestigationCreate(ApiModel):
     title: str | None = Field(default=None, min_length=1, max_length=512)
     description: str | None = Field(default=None, max_length=4000)
     fault_type: str | None = Field(default=None, min_length=1, max_length=64)
+    fault_config: FaultConfig | None = Field(
+        default=None,
+        description="Nested fault configuration (preferred over flat fault_type).",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

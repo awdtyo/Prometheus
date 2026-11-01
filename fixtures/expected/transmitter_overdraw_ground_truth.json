@@ -1,0 +1,38 @@
+{
+  "scenario_id": "transmitter_overdraw",
+  "synthetic": true,
+  "injected_fault": {
+    "fault_type": "power_degradation",
+    "target_subsystem": "comms",
+    "start_time": "2026-03-14T08:05:00+00:00",
+    "duration_seconds": 900.0,
+    "magnitude": 0.3,
+    "parameters": {
+      "root_cause": "transmitter_overdraw",
+      "affected_parameter": "transmitter_power_w"
+    }
+  },
+  "expected_causal_sequence": [
+    {
+      "step": 1,
+      "timestamp": "2026-03-14T08:05:00+00:00",
+      "subsystem": "comms",
+      "event_type": "transmitter_overdraw",
+      "description": "Transmitter overdraw begins; bus and SNR degrade.",
+      "evidence_ids": [
+        "evt_001"
+      ]
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-03-14T08:15:00+00:00",
+      "subsystem": "comms",
+      "event_type": "communication_loss_critical",
+      "description": "SNR crosses critical low; downlink at risk.",
+      "evidence_ids": [
+        "evt_002"
+      ]
+    }
+  ],
+  "expected_terminal_state": "safe_mode"
+}

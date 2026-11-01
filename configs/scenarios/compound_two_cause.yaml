@@ -1,0 +1,23 @@
+id: compound_two_cause
+name: Compound Power + Thermal Fault
+description: 'Two independent causes coincide: a battery cell imbalance sags the bus
+  while a stuck heater adds thermal load.'
+seed: 20260314
+mission_start_utc: '2026-03-14T08:00:00+00:00'
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+subsystems:
+- eps
+- tcs
+- adcs
+- comms
+- obc
+fault:
+  fault_type: power_degradation
+  target_subsystem: eps
+  start_met_seconds: 600.0
+  duration_seconds: 2400.0
+  magnitude: 0.4
+telemetry_file: fixtures/telemetry/compound_two_cause_telemetry.csv
+event_log_json: fixtures/events/compound_two_cause_events.json
+event_log_csv: fixtures/events/compound_two_cause_events.csv
