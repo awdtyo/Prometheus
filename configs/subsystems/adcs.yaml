@@ -60,6 +60,13 @@ dependencies:
   - eps
   - obc
 
+dependency_lags:
+  - subsystem: eps
+    min_lag_seconds: 60.0
+    max_lag_seconds: 300.0
+  - subsystem: obc
+    min_lag_seconds: 0.0
+    max_lag_seconds: 60.0
 relevant_events:
   - event_type: attitude_control_degraded
     description: Attitude error exceeds the nominal pointing limit.

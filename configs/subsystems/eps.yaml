@@ -57,6 +57,7 @@ monitored_parameters:
     description: Estimated battery state of charge.
 
 dependencies: []
+dependency_lags: []
 
 relevant_events:
   - event_type: battery_cell_imbalance

@@ -61,6 +61,16 @@ dependencies:
   - obc
   - adcs
 
+dependency_lags:
+  - subsystem: eps
+    min_lag_seconds: 60.0
+    max_lag_seconds: 300.0
+  - subsystem: obc
+    min_lag_seconds: 0.0
+    max_lag_seconds: 60.0
+  - subsystem: adcs
+    min_lag_seconds: 30.0
+    max_lag_seconds: 180.0
 relevant_events:
   - event_type: downlink_started
     description: Scheduled high-gain antenna downlink begins.

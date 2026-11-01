@@ -78,6 +78,24 @@ class EventSpec(AutopsyModel):
     severity: Severity = Field(description="Expected severity of the event.")
 
 
+class DependencyLag(AutopsyModel):
+    """Propagation lag between a subsystem and one of its dependencies."""
+
+    subsystem: SubsystemId = Field(description="Dependency target subsystem id.")
+    min_lag_seconds: float = Field(
+        default=0.0, ge=0.0, description="Minimum propagation lag in seconds."
+    )
+    max_lag_seconds: float = Field(
+        default=300.0, ge=0.0, description="Maximum propagation lag in seconds."
+    )
+
+    @model_validator(mode="after")
+    def _lag_ordered(self) -> Self:
+        if self.min_lag_seconds > self.max_lag_seconds:
+            raise ValueError("min_lag_seconds must be <= max_lag_seconds")
+        return self
+
+
 class SubsystemSpec(AutopsyModel):
     """Declarative definition of one spacecraft subsystem."""
 
@@ -91,6 +109,10 @@ class SubsystemSpec(AutopsyModel):
     dependencies: list[SubsystemId] = Field(
         default_factory=list,
         description="Subsystems this subsystem depends on.",
+    )
+    dependency_lags: list[DependencyLag] = Field(
+        default_factory=list,
+        description="Propagation lag windows for each dependency.",
     )
     relevant_events: list[EventSpec] = Field(
         min_length=1,

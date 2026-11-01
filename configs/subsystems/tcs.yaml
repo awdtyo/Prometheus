@@ -49,6 +49,10 @@ monitored_parameters:
 dependencies:
   - eps
 
+dependency_lags:
+  - subsystem: eps
+    min_lag_seconds: 60.0
+    max_lag_seconds: 300.0
 relevant_events:
   - event_type: thermal_control_degraded
     description: Thermal control cannot hold the battery setpoint.
