@@ -96,15 +96,25 @@ the same route will start the real workflow.
 | `scenario_id` | string            | yes      | 1–128 characters; not blank       |
 | `title`       | string \| null    | no       | 1–512 characters                  |
 | `description` | string \| null    | no       | Up to 4000 characters             |
-| `fault_type`  | string \| null    | no       | 1–64 characters                   |
+| `fault_config`| object            | no       | Nested `FaultConfig` (fault_type, target_subsystem, start_time, duration_seconds, magnitude, parameters) |
 | `metadata`    | object            | no       | Request metadata; defaults to `{}` |
+| `agent_config`| object            | no       | `enabled`, `max_hypotheses`, `temperature`, `model`, `seed`, `timeout_seconds`, `prompt_version` |
+| `scoring_config`| object         | no       | Weights default to `0.4`/`0.35`/`0.25` and must sum to `1.0` |
+
+The flat `fault_type` string is no longer used on this endpoint; fault injection is expressed through the nested `fault_config` object.
 
 ```json
 {
   "scenario_id": "scn_power_undervoltage",
   "title": "Power bus undervoltage",
   "description": "Battery heater fault telemetry.",
-  "fault_type": "power_degradation"
+  "fault_config": {
+    "fault_type": "power_degradation",
+    "target_subsystem": "power",
+    "start_time": "2026-10-30T12:01:00Z",
+    "duration_seconds": 120,
+    "magnitude": 40
+  }
 }
 ```
 
@@ -524,9 +534,10 @@ at the top level instead; mixing the nested and flat forms is rejected with
 }
 ```
 
-`status` values are `queued`, `running`, `completed`, `failed`, and `cancelled`;
-the mock returns `queued`. `fault_config` is repeated at the top level for
-convenience and is identical to the validated object nested under
+`status` values are `pending`, `running`, `completed`, `failed`, and `cancelled`;
+the mock returns `pending`. `queue_position` is a separate informational field on
+run responses and is not part of the status enum. `fault_config` is repeated at the
+top level for convenience and is identical to the validated object nested under
 `investigation_config`.
 
 Validation behavior:
@@ -593,11 +604,75 @@ curl -X POST http://127.0.0.1:8000/api/v1/runs \
   hypotheses and timeline events deterministically from the investigation ID.
 - Scenario definitions are immutable in-process fixtures. Fault injection only
   validates and previews; it never writes back to a scenario.
-- Runs are persisted with status `queued` and appended to an in-memory FIFO job
+- Runs are persisted with status `pending` and appended to an in-memory FIFO job
   queue. No simulator, graph, agent, or worker logic executes yet.
 - It never imports simulator, graph, or agent code from `autopsy/`.
 - Set `MISSION_AUTOPSY_USE_MOCK_SERVICES=true` (the default) to use it. The
   service factory is the single switch point for a future `autopsy` adapter.
+
+## Agreed contract decisions
+
+The following decisions standardize the HTTP contract across backend, frontend, and
+docs. Source of truth: `autopsy/schemas/` for domain objects;
+`docs/api-contract.md` for HTTP request/response shapes. Backend (`backend/schemas/`)
+and frontend (`frontend/src/types/`) must conform to these docs.
+
+### a. Run status
+
+The run lifecycle status enum is `pending | running | completed | failed | cancelled`.
+`queue_position` is a separate informational field on run responses and is not part of
+the status enum.
+
+### b. POST /api/v1/investigations body
+
+The request body uses a nested `fault_config` object (fields per `FaultConfig`),
+plus optional `title`, `description`, `metadata`, `agent_config`, and
+`scoring_config`. The flat `fault_type` string is no longer used on this endpoint.
+
+### c. Investigation responses
+
+Investigation responses include both `id` and `investigation_id` (same value).
+`investigation_id` is an explicit alias of `id` matching the path parameter name.
+
+### d. Scenario summaries
+
+Scenario summaries expose `subsystems` as an array of subsystem ids.
+
+### e. Timeline events
+
+Timeline events include `metadata` (a JSON object).
+
+### f. Evaluation metrics
+
+`EvaluationMetrics` on the wire is the full 12-field shape:
+`root_cause_accuracy`, `runtime_seconds`, `evidence_weight`,
+`consistency_weight`, `coverage_weight`, `contradiction_penalty`,
+`fault_localization_accuracy`, `causal_chain_accuracy`, `evidence_coverage`,
+`temporal_ordering_accuracy`, `contradiction_handling`, `unsupported_claim_rate`.
+
+### g. Source of truth
+
+`autopsy/schemas/` is the source of truth for domain objects.
+`docs/api-contract.md` is the source of truth for HTTP shapes. Backend and frontend
+must conform to these docs.
+
+## Pending alignment work
+
+The following changes are required to align backend and frontend with the agreed
+contract. Taken from the contract drift audit (items 1–5 and 8).
+
+| Layer | Change | Drift item |
+| --- | --- | --- |
+| backend | `RunStatus`: replace `queued` with `pending`; keep `queue_position` separate | 3 |
+| backend | `POST /api/v1/investigations`: accept nested `fault_config` (title, description, metadata, agent_config, scoring_config); drop flat `fault_type` string | 2 |
+| backend | Investigation responses: include both `id` and `investigation_id` alias | 1, 2c |
+| backend | `ScenarioResponse`/`ScenarioDetailResponse`: expose `subsystems` as array of ids | 4 |
+| backend | Timeline events: include `metadata` JSON object | 5 |
+| frontend | `InvestigationCreate`: nested `fault_config` (not flat `fault_type`); add `id` to `InvestigationRead` | 1, 2c |
+| frontend | `RunStatus`: use `pending` (not `queued`) | 3 |
+| frontend | `ScenarioSummary.subsystems`: array of ids (not single string) | 4 |
+| frontend | `TimelineEvent.metadata`: add JSON object field | 5 |
+| frontend | `EvaluationMetrics` in `domain.ts`: expand to full 12-field shape | 8 |
 
 ## Frontend integration
 

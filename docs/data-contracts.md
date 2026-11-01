@@ -940,6 +940,25 @@ instead of leaking file-system, PyYAML, CSV, JSON, or Pydantic exceptions.
 | `load_ground_truth(path)` | `GroundTruth` | Evaluation only. |
 | `load_investigation_inputs(scenario_path, ...)` | `InvestigationInputs` | Cross-checks config, telemetry, and events; never reads `expected/`. |
 
+## 8.7 Contract decisions
+
+The following cross-cutting decisions were agreed and are reflected in
+`docs/api-contract.md`:
+
+- Source of truth: `autopsy/schemas/` for domain objects;
+  `docs/api-contract.md` for HTTP request/response shapes. Backend and frontend
+  must conform to these docs.
+- Run lifecycle status: `pending | running | completed | failed | cancelled`;
+  `queue_position` is separate from the status enum.
+- `POST /api/v1/investigations` uses a nested `fault_config` object (plus optional
+  `title`, `description`, `metadata`, `agent_config`, `scoring_config`); the flat
+  `fault_type` string is no longer used.
+- Investigation responses include both `id` and `investigation_id` (same value).
+- Scenario summaries expose `subsystems` as an array of subsystem ids.
+- Timeline events include `metadata` (a JSON object).
+- `EvaluationMetrics` on the wire is the full 12-field shape listed in
+  `docs/api-contract.md`.
+
 ## 9. Change process
 
 1. Propose the shape change with a rationale and the affected models.
