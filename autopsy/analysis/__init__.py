@@ -1,6 +1,3 @@
-"""Evidence scoring, hypothesis ranking, and narrative assembly.
+from autopsy.analysis.scoring import score_hypotheses
 
-Planned responsibilities: consistency checks against telemetry and the causal
-graph, confidence scoring, ranking, and export of the most plausible sequence.
-Prefer pure functions over domain models wherever possible.
-"""
+__all__ = ["score_hypotheses"]
