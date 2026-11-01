@@ -1,0 +1,92 @@
+[
+  {
+    "stage": "proposing",
+    "message": "Proposing hypotheses",
+    "fraction": 0.1,
+    "timestamp": "2026-11-01T11:37:12.900716+00:00"
+  },
+  {
+    "stage": "prosecuting",
+    "message": "Prosecuting h1",
+    "fraction": 0.3,
+    "timestamp": "2026-11-01T11:37:22.927982+00:00"
+  },
+  {
+    "stage": "skepticking",
+    "message": "Skepticking h1",
+    "fraction": 0.5,
+    "timestamp": "2026-11-01T11:38:15.056685+00:00"
+  },
+  {
+    "stage": "prosecuting",
+    "message": "Prosecuting h2",
+    "fraction": 0.3,
+    "timestamp": "2026-11-01T11:39:14.645959+00:00"
+  },
+  {
+    "stage": "skepticking",
+    "message": "Skepticking h2",
+    "fraction": 0.5,
+    "timestamp": "2026-11-01T11:40:14.548793+00:00"
+  },
+  {
+    "stage": "prosecuting",
+    "message": "Prosecuting h3",
+    "fraction": 0.3,
+    "timestamp": "2026-11-01T11:41:13.735457+00:00"
+  },
+  {
+    "stage": "skepticking",
+    "message": "Skepticking h3",
+    "fraction": 0.5,
+    "timestamp": "2026-11-01T11:42:14.560908+00:00"
+  },
+  {
+    "stage": "prosecuting",
+    "message": "Prosecuting h4",
+    "fraction": 0.3,
+    "timestamp": "2026-11-01T11:43:13.850375+00:00"
+  },
+  {
+    "stage": "skepticking",
+    "message": "Skepticking h4",
+    "fraction": 0.5,
+    "timestamp": "2026-11-01T11:44:14.487395+00:00"
+  },
+  {
+    "stage": "done",
+    "message": "Complete",
+    "fraction": 1.0,
+    "timestamp": "2026-11-01T11:45:14.071386+00:00"
+  },
+  {
+    "stage": "ingesting",
+    "message": "Ingesting inputs",
+    "fraction": 0.05,
+    "timestamp": "2026-11-01T11:45:14.072995+00:00"
+  },
+  {
+    "stage": "graphing",
+    "message": "Building graph",
+    "fraction": 0.2,
+    "timestamp": "2026-11-01T11:45:14.075860+00:00"
+  },
+  {
+    "stage": "analyzing",
+    "message": "Running agents",
+    "fraction": 0.4,
+    "timestamp": "2026-11-01T11:45:14.312485+00:00"
+  },
+  {
+    "stage": "scoring",
+    "message": "Scoring",
+    "fraction": 0.8,
+    "timestamp": "2026-11-01T11:45:14.314271+00:00"
+  },
+  {
+    "stage": "completed",
+    "message": "Complete",
+    "fraction": 1.0,
+    "timestamp": "2026-11-01T11:45:14.314978+00:00"
+  }
+]

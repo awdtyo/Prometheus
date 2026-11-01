@@ -1,0 +1,15 @@
+{
+  "mode": "real",
+  "provider": "groq",
+  "models": {
+    "reasoning": "openai/gpt-oss-120b",
+    "fast": "openai/gpt-oss-20b",
+    "alt": "qwen/qwen3.8-27b"
+  },
+  "tokens_in": 19147,
+  "tokens_out": 8520,
+  "calls": 9,
+  "duration_seconds": 481.17,
+  "recorded_at": "2026-11-01T11:45:14.327725+00:00",
+  "scenario": "battery_failure"
+}
