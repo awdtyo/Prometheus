@@ -1,6 +1,7 @@
-"""Causal and temporal graph construction using NetworkX.
+"""Causal and temporal graph construction."""
 
-Planned responsibilities: dependency graph assembly, temporal edge derivation,
-cycle detection, and subgraph extraction around failure events. No persistence
-or HTTP concerns belong in this package.
-"""
+from __future__ import annotations
+
+from autopsy.graph.builder import GraphConfig, build_graph
+
+__all__ = ["GraphConfig", "build_graph"]
