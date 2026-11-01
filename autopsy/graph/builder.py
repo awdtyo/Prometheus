@@ -93,6 +93,7 @@ def build_graph(
     telemetry: list[TelemetryRecord],
     specs: dict[str, SubsystemSpec] | list[SubsystemSpec],
     config: GraphConfig | None = None,
+    spec_aware: bool = True,
 ) -> Graph:
     cfg = config or GraphConfig()
 
@@ -172,10 +173,10 @@ def build_graph(
                 continue  # no backward edges
 
             lag = (tgt_ts - src_ts).total_seconds()
-            allowed = _allowed_lag(src_sub, tgt_sub, spec_map)
+            allowed = _allowed_lag(src_sub, tgt_sub, spec_map) if spec_aware else None
 
             # spec allows?
-            spec_allowed = allowed is not None
+            spec_allowed = allowed is not None if spec_aware else True
             in_window = False
             if allowed is not None:
                 mn, mx = allowed
