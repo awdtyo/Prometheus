@@ -1,90 +1,45 @@
-/* =============================================================================
-   React Router Configuration
-   -------------------------------------------------------
-   Defines all routes for the Mission Autopsy command center.
-   Uses data-driven routing where the sidebar and top bar derive their
-   active state from the current pathname.
-   ============================================================================= */
+import { createBrowserRouter, type RouteObject } from "react-router-dom";
 
-import { createBrowserRouter, RouterProvider, RouteObject } from "react-router-dom";
-import type { ReactNode } from "react";
-
-import { MissionOverviewPage } from "./pages/MissionOverview";
-import { ScenarioExplorerPage } from "./pages/ScenarioExplorer";
+import { Layout } from "./components/Layout";
+import { ScenariosPage } from "./pages/Scenarios";
 import { InvestigationWorkspacePage } from "./pages/InvestigationWorkspace";
 import { CausalGraphPage } from "./pages/CausalGraph";
-import { HypothesisAnalysisPage } from "./pages/HypothesisAnalysis";
-import { EvaluationDashboardPage } from "./pages/EvaluationDashboard";
-import { LiveInvestigationPage } from "./pages/LiveInvestigation";
-import { ErrorPlaceholder } from "./components/Layout";
+import { HypothesesPage } from "./pages/Hypotheses";
+import { EvaluationPage } from "./pages/Evaluation";
 
-/* -------------------------------------------------------
-   Route definitions
-   ------------------------------------------------------- */
+function ErrorElement() {
+  return (
+    <div style={{ padding: 24, color: "var(--text)", fontFamily: "var(--mono)" }}>
+      <h2>Route error</h2>
+      <p>The requested route could not be rendered.</p>
+    </div>
+  );
+}
 
-const routes: RouteObject[] = [
+function NotFound() {
+  return (
+    <div style={{ padding: 24, color: "var(--text)", fontFamily: "var(--mono)" }}>
+      <h2>404 — Page not found</h2>
+      <p>The route you requested does not exist.</p>
+    </div>
+  );
+}
+
+export const routes: RouteObject[] = [
   {
     path: "/",
-    element: <MissionOverviewPage />,
-    errorElement: <ErrorPlaceholder message="Mission overview not found." />,
-  },
-  {
-    path: "/scenarios",
-    element: <ScenarioExplorerPage />,
-    errorElement: <ErrorPlaceholder message="Scenario explorer not found." />,
-  },
-  {
-    path: "/workspace",
-    element: <InvestigationWorkspacePage />,
-    errorElement: <ErrorPlaceholder message="Investigation workspace not found." />,
-  },
-  {
-    path: "/causal-graph",
-    element: <CausalGraphPage />,
-    errorElement: <ErrorPlaceholder message="Causal graph not found." />,
-  },
-  {
-    path: "/hypotheses",
-    element: <HypothesisAnalysisPage />,
-    errorElement: <ErrorPlaceholder message="Hypothesis analysis not found." />,
-  },
-  {
-    path: "/evaluation",
-    element: <EvaluationDashboardPage />,
-    errorElement: <ErrorPlaceholder message="Evaluation dashboard not found." />,
-  },
-  {
-    path: "/investigation",
-    element: <LiveInvestigationPage />,
-    errorElement: <ErrorPlaceholder message="Live investigation not found." />,
-  },
-  /* -------------------------------------------------------
-     Catch-all 404
-     ------------------------------------------------------- */
-  {
-    path: "/*",
-    element: (
-      <div className="page">
-        <h2>404 — Page not found</h2>
-        <p>The route you requested does not exist in the Mission Autopsy command center.</p>
-        <ErrorPlaceholder message="Unknown route." />
-      </div>
-    ),
+    element: <Layout />,
+    errorElement: <ErrorElement />,
+    children: [
+      { index: true, element: <ScenariosPage /> },
+      { path: "scenarios", element: <ScenariosPage /> },
+      { path: "investigation/:id", element: <InvestigationWorkspacePage /> },
+      { path: "causal-graph", element: <CausalGraphPage /> },
+      { path: "hypotheses", element: <HypothesesPage /> },
+      { path: "evaluation", element: <EvaluationPage /> },
+      { path: "/*", element: <NotFound /> },
+    ],
   },
 ];
 
-/* -------------------------------------------------------
-   Router creation
-   ------------------------------------------------------- */
-
 export const router = createBrowserRouter(routes);
-
-/* -------------------------------------------------------
-   Root renderer
-   ------------------------------------------------------- */
-
-type RootElement = ReactNode;
-
-export function RouterRoot({ initialEntries }: { initialEntries?: string[] }) {
-  return <RouterProvider router={router} initial={initialEntries} />;
-}

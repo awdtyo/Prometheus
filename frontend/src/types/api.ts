@@ -1,4 +1,19 @@
-import { EntityId, SubsystemId, ParameterName, TypeName, Severity, RunStatus, EvidenceType, EvidenceStance, FaultType, NodeType, RelationshipType, JsonObject } from "./domain";
+/* =============================================================================
+   HTTP wire types mirroring docs/api-contract.md.
+   Field naming is snake_case; timestamps are UTC ISO 8601 with a Z suffix.
+   ============================================================================= */
+
+import type {
+  EntityId,
+  SubsystemId,
+  ParameterName,
+  TypeName,
+  Severity,
+  RunStatus,
+  FaultType,
+  JsonObject,
+  EvaluationMetrics,
+} from "./domain";
 
 export type ConnectionStatus = "loading" | "online" | "offline";
 
@@ -9,232 +24,109 @@ export interface HealthResponse {
   environment: string;
 }
 
-/* =============================================================================
-   Planned API DTO types (mirroring docs/api-contract.md)
-   ============================================================================= */
+/* -------------------------------------------------------
+   Catalog
+   ------------------------------------------------------- */
 
-/** Investigation summary returned by list/get endpoints */
-export interface InvestigationSummary {
+/** Scenario summary returned by GET /api/v1/scenarios */
+export interface ScenarioSummary {
+  id: EntityId;
+  name: string;
+  description: string;
+  duration_seconds: number;
+  subsystem_ids: SubsystemId[];
+  fault_types: FaultType[];
+}
+
+/** Telemetry channel available in a scenario (GET /api/v1/scenarios/{id}) */
+export interface TelemetryParameterResponse {
+  parameter: ParameterName;
+  subsystem: SubsystemId;
+  unit: string;
+  nominal_value: number;
+  description: string;
+}
+
+/** A spacecraft subsystem and its direct dependencies */
+export interface SubsystemResponse {
+  id: SubsystemId;
+  name: string;
+  description: string;
+  depends_on: SubsystemId[];
+}
+
+/** A fault type supported by a scenario and its allowed targets */
+export interface FaultOptionResponse {
+  fault_type: FaultType;
+  description: string;
+  target_subsystems: SubsystemId[];
+  min_duration_seconds: number;
+  max_duration_seconds: number;
+  min_magnitude: number;
+  max_magnitude: number;
+}
+
+/** Complete scenario configuration (GET /api/v1/scenarios/{id}) */
+export interface ScenarioDetailResponse {
+  id: EntityId;
+  name: string;
+  description: string;
+  duration_seconds: number;
+  subsystem_ids: SubsystemId[];
+  fault_types: FaultType[];
+  mission_start_utc: string;
+  subsystems: SubsystemResponse[];
+  telemetry_parameters: TelemetryParameterResponse[];
+  fault_options: FaultOptionResponse[];
+}
+
+/** Collection of available scenarios */
+export interface ScenarioListResponse {
+  items: ScenarioSummary[];
+}
+
+/** Collection of subsystems */
+export interface SubsystemListResponse {
+  items: SubsystemResponse[];
+}
+
+/* -------------------------------------------------------
+   Investigations
+   ------------------------------------------------------- */
+
+/** Current state and summary of one investigation (POST/GET /api/v1/investigations) */
+export interface Investigation {
+  id: EntityId;
   investigation_id: EntityId;
   scenario_id: EntityId;
-  status: RunStatus;
-  created_at: string; // ISO 8601 UTC
-  updated_at: string; // ISO 8601 UTC
-}
-
-/** Hypothesis summary returned by list endpoint */
-export interface HypothesisSummary {
-  hypothesis_id: EntityId;
   title: string;
-  summary: string;
-  confidence: number;
-  score: number;
+  description: string | null;
+  fault_type: FaultType | null;
   status: RunStatus;
+  progress: number;
+  current_stage: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 }
 
-/** Timeline event item */
-export interface TimelineEvent {
-  event_id: EntityId;
-  timestamp: string; // ISO 8601 UTC
-  subsystem: SubsystemId;
-  event_type: TypeName;
-  description: string;
-  severity: Severity;
+/** Cursor-paginated investigation list */
+export interface InvestigationListResponse {
+  items: Investigation[];
+  next_cursor: string | null;
 }
 
 /** Proposed investigation creation payload */
 export interface InvestigationCreate {
   scenario_id: EntityId;
-  fault_config: FaultConfigCreate;
-  agent_config?: AgentConfigCreate;
-  scoring_config?: ScoringConfigCreate;
+  title?: string | null;
+  description?: string | null;
+  metadata?: JsonObject;
 }
 
-/** Fault config for API creation */
-export interface FaultConfigCreate {
-  fault_type: FaultType;
-  target_subsystem: SubsystemId;
-  start_time: string; // ISO 8601 UTC
-  duration_seconds: number;
-  magnitude: number;
-  parameters?: JsonObject;
-}
-
-/** Agent config for API creation */
-export interface AgentConfigCreate {
-  enabled?: boolean;
-  max_hypotheses?: number;
-  temperature?: number;
-  model?: string;
-  seed?: number;
-  timeout_seconds?: number;
-  prompt_version?: string;
-}
-
-/** Scoring config for API creation */
-export interface ScoringConfigCreate {
-  evidence_weight: number;
-  consistency_weight: number;
-  coverage_weight: number;
-  contradiction_penalty: number;
-}
-
-/** Full investigation read response */
-export interface InvestigationRead {
-  investigation_id: EntityId;
-  scenario_id: EntityId;
-  status: RunStatus;
-  created_at: string;
-  updated_at: string;
-  scenario?: ScenarioSummary;
-  run_timestamps: RunTimestamps;
-  observations: ObservationSummary[];
-  graph: GraphSummary;
-  hypotheses: HypothesisSummary[];
-  investigation_report?: string;
-  evaluation_metrics?: EvaluationMetrics;
-}
-
-/** Summary of a scenario config */
-export interface ScenarioSummary {
-  scenario_id: EntityId;
-  name: string;
-  description: string;
-  subsystem: SubsystemId;
-}
-
-/** Summary of an observation */
-export interface ObservationSummary {
-  observation_id: EntityId;
-  timestamp: string;
-  subsystem: SubsystemId;
-  observation_type: TypeName;
-  description: string;
-  observed_value: number;
-  threshold?: number;
-  severity: Severity;
-}
-
-/** Evaluation metrics for an investigation */
-export interface EvaluationMetrics {
-  root_cause_accuracy: number;
-  runtime_seconds: number;
-  evidence_weight: number;
-  consistency_weight: number;
-  coverage_weight: number;
-  contradiction_penalty: number;
-  fault_localization_accuracy: number;
-  causal_chain_accuracy: number;
-  evidence_coverage: number;
-  temporal_ordering_accuracy: number;
-  contradiction_handling: number;
-  unsupported_claim_rate: number;
-}
-
-/** Baseline comparison results */
-export interface BaselineComparison {
-  threshold_only: number;
-  earliest_anomaly: number;
-  dependency_only: number;
-  full_autopsy: number;
-}
-
-/** Per-scenario performance */
-export interface ScenarioPerformance {
-  scenario_id: string;
-  scenario_name: string;
-  fault_localization: number;
-  causal_accuracy: number;
-  evidence_cov: number;
-  temporal_accuracy: number;
-  contradiction_score: number;
-  unsupported_rate: number;
-}
-
-/** Error breakdown */
-export interface ErrorBreakdown {
-  mislocalized_faults: number;
-  chain_errors: number;
-  temporal_errors: number;
-  unsupported_claims: number;
-  total_evidence: number;
-}
-
-/** Hypothesis ranking comparison */
-export interface HypothesisRankingComparison {
-  hypothesis_id: string;
-  title: string;
-  rank: number;
-  score: number;
-  causal_acc: number;
-  evidence_count: number;
-  contradiction_count: number;
-  assumptions_count: number;
-}
-
-/* =============================================================================
-   Mock fixture types (internal, not sent over HTTP)
-   ============================================================================= */
-
-export interface MockInvestigation {
-  investigation_id: EntityId;
-  scenario_id: EntityId;
-  status: RunStatus;
-  created_at: string;
-  updated_at: string;
-  scenario: MockScenario;
-  run_timestamps: RunTimestamps;
-  observations: MockObservation[];
-  graph: MockGraph;
-  hypotheses: MockHypothesis[];
-  investigation_report?: string;
-  evaluation_metrics?: EvaluationMetrics;
-}
-
-export interface MockScenario {
-  scenario_id: EntityId;
-  name: string;
-  description: string;
-  mission_start_utc: string;
-  subsystems: SubsystemId[];
-}
-
-export interface MockObservation {
-  observation_id: EntityId;
-  timestamp: string;
-  subsystem: SubsystemId;
-  observation_type: TypeName;
-  description: string;
-  observed_value: number;
-  threshold?: number;
-  severity: Severity;
-  source_ids: EntityId[];
-}
-
-export interface MockGraph {
-  nodes: MockGraphNode[];
-  edges: MockGraphEdge[];
-}
-
-export interface MockGraphNode {
-  node_id: EntityId;
-  node_type: NodeType;
-  label: string;
-  timestamp?: string;
-  metadata: JsonObject;
-}
-
-export interface MockGraphEdge {
-  edge_id: EntityId;
-  source: EntityId;
-  target: EntityId;
-  relationship_type: RelationshipType;
-  evidence_ids: EntityId[];
-  confidence: number;
-  metadata: JsonObject;
-}
-
-export interface MockHypothesis {
+/** One ranked causal explanation */
+export interface Hypothesis {
   hypothesis_id: EntityId;
   title: string;
   summary: string;
@@ -245,3 +137,116 @@ export interface MockHypothesis {
   confidence: number;
   score: number;
 }
+
+export interface HypothesisListResponse {
+  investigation_id: EntityId;
+  hypotheses: Hypothesis[];
+}
+
+/** One reconstructed event in the investigation timeline */
+export interface TimelineEvent {
+  event_id: EntityId;
+  timestamp: string; // ISO 8601 UTC
+  subsystem: SubsystemId;
+  event_type: TypeName;
+  description: string;
+  severity: Severity;
+  metadata: JsonObject;
+}
+
+export interface TimelineResponse {
+  investigation_id: EntityId;
+  events: TimelineEvent[];
+}
+
+/* -------------------------------------------------------
+   Fault injection
+   ------------------------------------------------------- */
+
+/** Fault configuration (POST /api/v1/scenarios/{id}/inject) */
+export interface FaultConfig {
+  fault_type: FaultType;
+  target_subsystem: SubsystemId;
+  start_time: string; // ISO 8601 UTC
+  duration_seconds: number;
+  magnitude: number;
+  parameters?: JsonObject;
+}
+
+export interface InjectionPreview {
+  injection_id: EntityId;
+  scenario_id: EntityId;
+  preview: boolean;
+  applied: boolean;
+  fault_config: FaultConfig;
+  effective_start_time: string;
+  effective_end_time: string;
+  scenario: ScenarioDetailResponse;
+}
+
+/* -------------------------------------------------------
+   Runs
+   ------------------------------------------------------- */
+
+export interface RunResponse {
+  run_id: EntityId;
+  scenario_id: EntityId;
+  status: RunStatus;
+  title: string;
+  investigation_config: InvestigationConfig;
+  fault_config: FaultConfig;
+  queue_position: number;
+  created_at: string;
+  queued_at: string;
+  message: string;
+}
+
+export interface InvestigationConfig {
+  fault_config: FaultConfig;
+  agent_config: AgentConfig;
+  scoring_config: ScoringConfig;
+}
+
+export interface AgentConfig {
+  enabled: boolean;
+  max_hypotheses: number;
+  temperature: number;
+  model: string | null;
+  seed: number | null;
+  timeout_seconds: number;
+  prompt_version: string | null;
+}
+
+export interface ScoringConfig {
+  evidence_weight: number;
+  consistency_weight: number;
+  coverage_weight: number;
+  contradiction_penalty: number;
+}
+
+/* -------------------------------------------------------
+   Errors (RFC 9457 problem+json)
+   ------------------------------------------------------- */
+
+export interface ProblemError {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+}
+
+export interface Problem {
+  type: string;
+  title: string;
+  status: number;
+  detail: string;
+  instance: string;
+  code: string;
+  request_id: string;
+  errors?: ProblemError[];
+}
+
+/* -------------------------------------------------------
+   Re-exported domain types for consumers
+   ------------------------------------------------------- */
+
+export type { EvaluationMetrics };

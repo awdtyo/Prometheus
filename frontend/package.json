@@ -16,7 +16,7 @@
   "dependencies": {
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-flow-renderer": "^10.3.17",
+    "@xyflow/react": "^12.4.0",
     "react-router-dom": "^7.0.0",
     "recharts": "^2.9.0"
   },
