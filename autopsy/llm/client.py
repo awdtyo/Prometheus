@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -48,8 +50,64 @@ class LLMCounters:
         self.cache_hits += 1
 
 
+_NODE_ID_RE = re.compile(r"\b(obs:[A-Za-z0-9_.-]+)\b|\b(evt:[A-Za-z0-9_.-]+)\b")
+
+
+def _extract_node_ids(user: str) -> list[str]:
+    """Pull real node ids out of the agent prompt context so canned
+    hypotheses/evidence cite ids that actually exist."""
+    found: list[str] = []
+    for match in _NODE_ID_RE.finditer(user):
+        found.append(match.group(1) or match.group(2))
+    return found
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _evidence_dict(source_id: str, user: str, stance: str) -> dict[str, Any]:
+    return {
+        "evidence_id": "ev_canned_00",
+        "source_id": source_id,
+        "timestamp": _now_iso(),
+        "evidence_type": "observation",
+        "description": "canned evidence",
+        "supports_or_contradicts": stance,
+        "reliability": 0.5,
+    }
+
+
+def _claim_dict() -> dict[str, Any]:
+    return {"text": "canned claim", "label": "inference"}
+
+
+def _hypothesis_dict(user: str, index: int) -> dict[str, Any]:
+    nodes = _extract_node_ids(user)
+    chain = nodes[:3] or ["obs:canned_001"]
+    anchor = chain[0]
+    return {
+        "hypothesis_id": f"hyp_canned_{index:02d}",
+        "title": f"canned hypothesis {index}",
+        "summary": "canned explanation",
+        "causal_chain": list(chain),
+        "evidence_ids": [anchor],
+        "contradiction_ids": [],
+        "assumptions": [],
+        "confidence": 0.5,
+        "score": 0.5,
+    }
+
+
 class FakeLLM:
-    """Deterministic offline LLM returning schema-valid canned outputs."""
+    """Deterministic offline LLM returning schema-valid canned outputs.
+
+    Every response model used by the agents (``Hypothesis``,
+    ``ProposerOutput``, ``Evidence``, ``LabelledClaim``,
+    ``ProsecutorOutput``, ``SkepticOutput``) is built from its schema so the
+    canned output validates. Hypotheses and evidence cite real node ids parsed
+    from the prompt context instead of fabricated identifiers.
+    """
 
     def complete(
         self,
@@ -60,37 +118,61 @@ class FakeLLM:
         max_tokens: int,
         temperature: float,
     ) -> T:
-        # Build a minimal valid instance from the model's fields
-        data = _canned(response_model)
+        data = _canned(response_model, user)
         return response_model.model_validate(data)
 
 
-def _canned(model: type[BaseModel]) -> dict[str, Any]:
+def _canned(model: type[BaseModel], user: str = "") -> dict[str, Any]:
+    name = model.__name__
+
+    if name == "ProposerOutput":
+        return {"hypotheses": [_hypothesis_dict(user, i) for i in range(3)]}
+
+    if name == "Hypothesis":
+        return _hypothesis_dict(user, 0)
+
+    if name == "Evidence":
+        stance = "contradicts" if "skeptic" in user.lower() else "supports"
+        nodes = _extract_node_ids(user)
+        return _evidence_dict(nodes[0] if nodes else "obs:canned_001", user, stance)
+
+    if name == "LabelledClaim":
+        return _claim_dict()
+
+    if name == "ProsecutorOutput":
+        nodes = _extract_node_ids(user)
+        anchor = nodes[0] if nodes else "obs:canned_001"
+        return {
+            "evidence": [_evidence_dict(anchor, user, "supports")],
+            "claims": [_claim_dict()],
+        }
+
+    if name == "SkepticOutput":
+        nodes = _extract_node_ids(user)
+        anchor = nodes[0] if nodes else "obs:canned_001"
+        return {"evidence": [_evidence_dict(anchor, user, "contradicts")]}
+
+    # Generic annotation-based fallback for any other model.
     result: dict[str, Any] = {}
-    for name, field_info in model.model_fields.items():
+    for field_name, field_info in model.model_fields.items():
         ann = field_info.annotation
+        origin = getattr(ann, "__origin__", None)
+        is_list = ann is list or origin is list
         if ann is str:
-            result[name] = "canned"
+            result[field_name] = "canned"
         elif ann is int:
-            result[name] = 1
+            result[field_name] = 1
         elif ann is float:
-            result[name] = 0.5
+            result[field_name] = 0.5
         elif ann is bool:
-            result[name] = True
-        elif ann is list or (
-            hasattr(ann, "__origin__") and getattr(ann, "__origin__", None) is list
-        ):
-            result[name] = []
-        elif ann is dict or (
-            hasattr(ann, "__origin__") and getattr(ann, "__origin__", None) is dict
-        ):
-            result[name] = {}
+            result[field_name] = True
+        elif is_list:
+            result[field_name] = []
+        elif ann is dict or origin is dict:
+            result[field_name] = {}
         else:
-            # try default
-            if field_info.default is not None and field_info.default is not ...:
-                result[name] = field_info.default
-            else:
-                result[name] = None
+            default = field_info.default if field_info.default is not ... else None
+            result[field_name] = default
     return result
 
 
