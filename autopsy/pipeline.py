@@ -120,6 +120,37 @@ def run_scenario(scenario_id, config=None, llm=None, progress=None, use_cache=Tr
     return run_investigation(inputs, config=config, llm=llm, progress=progress, use_cache=use_cache)
 
 
+def replay_demo(scenario_id: str):
+    """Replay a recorded demo run without the LLM (offline-safe).
+
+    Returns ``(RunResult, progress_events, demo_meta)``. The recorded file may
+    carry a ``_demo`` metadata marker (mode, model, tokens, date) which is
+    stripped before schema validation; the mode is exposed in
+    ``result.investigation_report`` and returned in ``demo_meta`` so the UI can
+    surface how the demo was recorded.
+    """
+    import json
+
+    from autopsy.schemas.results import RunResult
+
+    demo_dir = Path("fixtures/demo") / scenario_id
+    run_path = demo_dir / "run_result.json"
+    events_path = demo_dir / "progress_events.json"
+    if not run_path.exists():
+        raise FileNotFoundError(f"No recorded demo run for scenario {scenario_id!r} at {run_path}")
+    data = json.loads(run_path.read_text())
+    meta = data.pop("_demo", {}) or {}
+    mode = meta.get("mode", "unknown")
+    result = RunResult.model_validate(data)
+    banner = f"[replay-demo: recorded {'real' if mode == 'real' else 'fake'} run]"
+    result.investigation_report = (result.investigation_report or "") + f"\n{banner}"
+    events = []
+    if events_path.exists():
+        events = json.loads(events_path.read_text())
+    demo_meta = {"mode": mode, "banner": banner, **meta}
+    return result, events, demo_meta
+
+
 def main():
     parser = argparse.ArgumentParser(prog="autopsy")
     sub = parser.add_subparsers(dest="cmd")
@@ -128,14 +159,43 @@ def main():
     runp.add_argument("--fake-llm", action="store_true")
     runp.add_argument("--no-cache", action="store_true")
     runp.add_argument("--json", dest="json_out", default=None)
+    runp.add_argument("--replay-demo", action="store_true")
     args = parser.parse_args()
     if args.cmd != "run":
         parser.print_help()
         sys.exit(1)
     from autopsy.llm.config import LLMConfig
-    llm = LLMClient(LLMConfig(fake=args.fake_llm))
+
+    config = LLMConfig.from_env()
+    if args.fake_llm:
+        # dataclass is frozen; rebuild with fake forced on
+        config = LLMConfig(
+            api_key=None,
+            fake=True,
+            cache_dir=config.cache_dir,
+            requests_per_minute=config.requests_per_minute,
+            tokens_per_minute=config.tokens_per_minute,
+            tokens_per_day=config.tokens_per_day,
+        )
+    elif not config.api_key:
+        print(
+            "ERROR: real LLM requested but no GROQ_API_KEY (or MISSION_AUTOPSY_LLM_API_KEY) is set. "
+            "Set the key or pass --fake-llm to run offline.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    mode = "fake" if config.fake else "real"
+    print(f"LLM mode: {mode} (key={'set' if config.api_key else 'none'})")
+    llm = LLMClient(config)
     try:
-        rr = run_scenario(args.scenario_id, llm=llm, use_cache=not args.no_cache)
+        if args.replay_demo:
+            rr, events, demo_meta = replay_demo(args.scenario_id)
+            print(demo_meta["banner"])
+            print(f"Replaying demo for {args.scenario_id} ({len(events)} progress events, mode={demo_meta['mode']})")
+            for ev in events:
+                print(f"  [{ev['fraction']:.0f}%] {ev['stage']}: {ev['message']}")
+        else:
+            rr = run_scenario(args.scenario_id, llm=llm, use_cache=not args.no_cache)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
