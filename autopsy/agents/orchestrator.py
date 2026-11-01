@@ -108,10 +108,12 @@ def generate_hypotheses(
 
     # Safety net: every hypothesis must cite at least one supporting evidence id
     # (schema requires non-empty evidence_ids). If the proposer left them empty,
-    # cite the first node of its causal chain as preliminary evidence.
+    # cite the first node of its causal chain as preliminary evidence and mark it
+    # so the judge does not count it as verified supporting evidence.
     for h in hyps:
         if not h.evidence_ids and h.causal_chain:
             h.evidence_ids = [h.causal_chain[0]]
+            h.metadata.setdefault("preliminary_evidence_ids", []).append(h.causal_chain[0])
 
     # Keep only causal-chain node ids that actually exist in the provided
     # context; drop hypotheses whose chain collapses to nothing valid.

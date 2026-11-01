@@ -62,6 +62,12 @@ def test_real_service_fake_llm_matches_cli(tmp_path):
         assert svc_h.score == cli_h.score
         assert svc_h.causal_chain == cli_h.causal_chain
 
+    # Scores must be non-zero and vary across hypotheses (a comparison of two
+    # zeros is not a valid equality test).
+    scores = [h.score for h in hyps]
+    assert all(s > 0.0 for s in scores), f"scores must be non-zero, got {scores}"
+    assert len({round(s, 4) for s in scores}) > 1, f"scores must vary, got {scores}"
+
 
 def test_real_service_stream_progress_emits_events(tmp_path):
     svc = _service(tmp_path)

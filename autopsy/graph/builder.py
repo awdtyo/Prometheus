@@ -15,6 +15,7 @@ from autopsy.schemas.observations import Observation
 from autopsy.schemas.subsystems import SubsystemSpec
 from autopsy.schemas.telemetry import TelemetryRecord
 from autopsy.schemas.enums import NodeType, RelationshipType
+from autopsy.ids import evt_node_id, obs_node_id
 
 
 @dataclass(frozen=True)
@@ -26,11 +27,11 @@ class GraphConfig:
 
 
 def _node_id_obs(obs: Observation) -> str:
-    return f"obs:{obs.observation_id}"
+    return obs_node_id(obs.observation_id)
 
 
 def _node_id_event(ev: MissionEvent) -> str:
-    return f"evt:{ev.event_id}"
+    return evt_node_id(ev.event_id)
 
 
 def _allowed_lag(subsystem_a: str, subsystem_b: str, specs: dict[str, SubsystemSpec]) -> tuple[float, float] | None:

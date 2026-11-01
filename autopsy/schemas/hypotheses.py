@@ -1,5 +1,7 @@
 """Competing hypothesis contract."""
 
+from typing import Any
+
 from pydantic import Field, field_validator
 
 from autopsy.schemas.base import AutopsyModel, Description, EntityId, Label, ensure_unique
@@ -31,6 +33,10 @@ class Hypothesis(AutopsyModel):
     assumptions: list[Description] = Field(
         default_factory=list,
         description="Assumptions required for the hypothesis to hold.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured annotations (e.g. preliminary_evidence_ids).",
     )
     confidence: float = Field(
         ge=0.0,

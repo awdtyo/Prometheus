@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from autopsy.ids import evt_node_id, is_node_id, obs_node_id, parse_node_id
 from autopsy.schemas.events import MissionEvent
 from autopsy.schemas.evidence import Evidence, EvidenceStance
 from autopsy.schemas.graph import Graph
@@ -65,12 +66,10 @@ def validate_claims(
     """
     obs_by_id, ev_by_id, node_by_id = _source_index(observations, events, graph)
     valid_ids = set(obs_by_id) | set(ev_by_id) | set(node_by_id)
-    # Evidence citations may use the plain source id (obs_001) or the prefixed
-    # node id (obs:obs_001); accept both forms.
-    for oid in list(obs_by_id):
-        valid_ids.add(f"obs:{oid}")
-    for eid in list(ev_by_id):
-        valid_ids.add(f"evt:{eid}")
+    # Evidence citations may use the plain source id (obs_001) or the canonical
+    # prefixed node id (obs:obs_001); accept both forms.
+    valid_ids.update(obs_node_id(oid) for oid in obs_by_id)
+    valid_ids.update(evt_node_id(eid) for eid in ev_by_id)
 
     validated: list[Evidence] = []
     downgrades: list[Downgrade] = []
@@ -108,10 +107,17 @@ def validate_claims(
 
 
 def _chain_explains(h: Hypothesis, observations: list[Observation]) -> set[str]:
-    chain_text = " ".join(h.causal_chain).lower()
+    chain = set(h.causal_chain)
+    obs_id_to_subsystem = {o.observation_id: o.subsystem for o in observations}
+    chain_subsystems = set()
+    for nid in h.causal_chain:
+        if is_node_id(nid):
+            _, opaque = parse_node_id(nid)
+            if opaque in obs_id_to_subsystem:
+                chain_subsystems.add(obs_id_to_subsystem[opaque])
     explained = set()
     for o in observations:
-        if o.subsystem.lower() in chain_text or o.observation_id in chain_text:
+        if obs_node_id(o.observation_id) in chain or o.subsystem in chain_subsystems:
             explained.add(o.observation_id)
     return explained
 
@@ -150,7 +156,11 @@ def score_hypotheses(
         avg_edge = sum(edge_confs) / max(1, len(edge_confs)) if edge_confs else 0.0
 
         sup_reliability = []
+        preliminary = set(h.metadata.get("preliminary_evidence_ids", []))
         for eid in h.evidence_ids:
+            if eid in preliminary:
+                # Auto-filled preliminary citations are not verified evidence.
+                continue
             ev = ev_by_id.get(eid)
             if ev is not None and ev.supports_or_contradicts == EvidenceStance.SUPPORTS:
                 sup_reliability.append(ev.reliability)

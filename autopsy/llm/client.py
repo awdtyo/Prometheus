@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import random
@@ -37,6 +38,8 @@ def _now_iso() -> str:
 
 _NODE_ID_RE = re.compile(r"\b(obs:[A-Za-z0-9_.-]+)\b|\b(evt:[A-Za-z0-9_.-]+)\b")
 
+_evidence_counter = itertools.count(1)
+
 
 def _extract_node_ids(user: str) -> list[str]:
     """Pull real node ids out of the agent prompt context so canned
@@ -53,7 +56,7 @@ def _extract_node_ids(user: str) -> list[str]:
 
 def _evidence_dict(source_id: str, stance: str) -> dict[str, Any]:
     return {
-        "evidence_id": "ev_canned_00",
+        "evidence_id": f"ev_canned_{next(_evidence_counter)}",
         "source_id": source_id,
         "timestamp": _now_iso(),
         "evidence_type": "observation",
@@ -69,7 +72,9 @@ def _claim_dict() -> dict[str, Any]:
 
 def _hypothesis_dict(user: str, index: int) -> dict[str, Any]:
     nodes = _extract_node_ids(user)
-    chain = nodes[:3] or ["obs:canned_001"]
+    # Stride picks nodes spread across the (subsystem-grouped) context so the
+    # competing hypotheses discuss different subsystems and score differently.
+    chain = [nodes[(index * 7) % len(nodes)]] if nodes else ["obs:canned_001"]
     anchor = chain[0]
     return {
         "hypothesis_id": f"hyp_canned_{index:02d}",
@@ -133,9 +138,10 @@ def _canned(model: type[BaseModel], user: str = "") -> dict[str, Any]:
         }
 
     if name == "SkepticOutput":
-        nodes = _extract_node_ids(user)
-        anchor = nodes[0] if nodes else "obs:canned_001"
-        return {"evidence": [_evidence_dict(anchor, "contradicts")]}
+        # Canned mode has no verified contradiction data; emit nothing so the
+        # orchestrator records no contradiction ids (avoids penalizing the same
+        # id the prosecutor cited as supporting).
+        return {"evidence": []}
 
     # Generic annotation-based fallback for any other model.
     result: dict[str, Any] = {}

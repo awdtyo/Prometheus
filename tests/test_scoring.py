@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from autopsy.analysis.scoring import score_hypotheses, validate_claims
+from autopsy.schemas.enums import RelationshipType
 from autopsy.schemas.events import MissionEvent
 from autopsy.schemas.evidence import Evidence, EvidenceStance, EvidenceType
-from autopsy.schemas.graph import Graph, GraphNode
+from autopsy.schemas.graph import Graph, GraphEdge, GraphNode
 from autopsy.schemas.hypotheses import Hypothesis
 from autopsy.schemas.observations import Observation
 
@@ -123,3 +124,121 @@ def test_score_hypotheses_ranks_and_bounds_scores():
     assert scores == sorted(scores, reverse=True)
     assert all(0.0 <= s <= 1.0 for s in scores)
     assert result.hypotheses[0].hypothesis_id == "h_a"
+
+
+def test_score_hypotheses_correct_chain_outscores_decoy():
+    """A hand-built case: the correct causal chain (matching subsystem +
+    graph edges) scores non-zero and clearly above a decoy chain."""
+    ts = datetime(2026, 3, 14, 8, 15, tzinfo=UTC)
+    obs = [
+        _obs("obs_eps_1", "eps", ts),
+        _obs("obs_eps_2", "eps", ts),
+        _obs("obs_eps_3", "eps", ts),
+        _obs("obs_tcs_1", "tcs", ts),
+    ]
+    graph = Graph(
+        nodes=[
+            GraphNode(node_id="obs:obs_eps_1", node_type="observation", label="e1", timestamp=ts),
+            GraphNode(node_id="obs:obs_eps_2", node_type="observation", label="e2", timestamp=ts),
+            GraphNode(node_id="obs:obs_eps_3", node_type="observation", label="e3", timestamp=ts),
+            GraphNode(node_id="obs:obs_tcs_1", node_type="observation", label="t1", timestamp=ts),
+        ],
+        edges=[
+            GraphEdge(
+                edge_id="edge_eps_1_2",
+                source="obs:obs_eps_1",
+                target="obs:obs_eps_2",
+                relationship_type=RelationshipType.TEMPORAL_PRECEDENCE,
+                evidence_ids=[],
+                confidence=0.8,
+                metadata={},
+            ),
+            GraphEdge(
+                edge_id="edge_eps_2_3",
+                source="obs:obs_eps_2",
+                target="obs:obs_eps_3",
+                relationship_type=RelationshipType.TEMPORAL_PRECEDENCE,
+                evidence_ids=[],
+                confidence=0.8,
+                metadata={},
+            ),
+        ],
+    )
+    correct = Hypothesis(
+        hypothesis_id="h_correct",
+        title="correct",
+        summary="eps chain with edges",
+        causal_chain=["obs:obs_eps_1", "obs:obs_eps_2", "obs:obs_eps_3"],
+        evidence_ids=["ev_eps_chain"],
+        contradiction_ids=[],
+        assumptions=[],
+        confidence=0.5,
+        score=0.0,
+    )
+    decoy = Hypothesis(
+        hypothesis_id="h_decoy",
+        title="decoy",
+        summary="tcs single node",
+        causal_chain=["obs:obs_tcs_1"],
+        evidence_ids=["ev_tcs_chain"],
+        contradiction_ids=[],
+        assumptions=[],
+        confidence=0.5,
+        score=0.0,
+    )
+    result = score_hypotheses([decoy, correct], [], graph, obs, events=[])
+    scores = [h.score for h in result.hypotheses]
+    assert scores == sorted(scores, reverse=True)
+    assert result.hypotheses[0].hypothesis_id == "h_correct"
+    assert result.hypotheses[0].score > 0.0
+    assert result.hypotheses[0].score > result.hypotheses[1].score
+    assert all(0.0 <= s <= 1.0 for s in scores)
+    # scores vary across hypotheses
+    assert len({round(s, 4) for s in scores}) > 1
+
+
+def test_preliminary_evidence_not_counted_as_verified():
+    """A hypothesis whose only evidence id is auto-filled (preliminary) scores
+    lower than an identical hypothesis backed by prosecutor-verified evidence."""
+    ts = datetime(2026, 3, 14, 8, 15, tzinfo=UTC)
+    obs = [_obs("obs_eps_1", "eps", ts)]
+    graph = Graph(
+        nodes=[
+            GraphNode(node_id="obs:obs_eps_1", node_type="observation", label="e1", timestamp=ts)
+        ],
+        edges=[],
+    )
+    verified = _evidence("ev_real", "obs:obs_eps_1", ts, stance=EvidenceStance.SUPPORTS)
+    verified.reliability = 0.9
+
+    verified_hyp = Hypothesis(
+        hypothesis_id="h_verified",
+        title="verified",
+        summary="backed by real evidence",
+        causal_chain=["obs:obs_eps_1"],
+        evidence_ids=["ev_real"],
+        contradiction_ids=[],
+        assumptions=[],
+        confidence=0.5,
+        score=0.0,
+    )
+    preliminary_hyp = Hypothesis(
+        hypothesis_id="h_preliminary",
+        title="preliminary",
+        summary="only auto-filled citation",
+        causal_chain=["obs:obs_eps_1"],
+        evidence_ids=["obs:obs_eps_1"],
+        contradiction_ids=[],
+        assumptions=[],
+        confidence=0.5,
+        score=0.0,
+        metadata={"preliminary_evidence_ids": ["obs:obs_eps_1"]},
+    )
+    result = score_hypotheses(
+        [preliminary_hyp, verified_hyp], [verified], graph, obs, events=[]
+    )
+    by_id = {h.hypothesis_id: h.score for h in result.hypotheses}
+    assert by_id["h_verified"] > 0.0
+    assert by_id["h_verified"] > by_id["h_preliminary"]
+    # Both are non-zero because the chain explains the single observation.
+    assert by_id["h_preliminary"] > 0.0
