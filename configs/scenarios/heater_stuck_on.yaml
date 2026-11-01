@@ -1,0 +1,23 @@
+id: heater_stuck_on
+name: Battery Heater Stuck On
+description: The battery heater contactor sticks closed, driving the thermal control
+  loop into overheat and raising bus load.
+seed: 20260314
+mission_start_utc: '2026-03-14T08:00:00+00:00'
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+subsystems:
+- eps
+- tcs
+- adcs
+- comms
+- obc
+fault:
+  fault_type: thermal_overheat
+  target_subsystem: tcs
+  start_met_seconds: 900.0
+  duration_seconds: 1200.0
+  magnitude: 0.5
+telemetry_file: fixtures/telemetry/heater_stuck_on_telemetry.csv
+event_log_json: fixtures/events/heater_stuck_on_events.json
+event_log_csv: fixtures/events/heater_stuck_on_events.csv

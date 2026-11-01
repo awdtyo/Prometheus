@@ -1,0 +1,37 @@
+{
+  "scenario_id": "heater_stuck_on",
+  "synthetic": true,
+  "injected_fault": {
+    "fault_type": "thermal_overheat",
+    "target_subsystem": "tcs",
+    "start_time": "2026-03-14T08:15:00+00:00",
+    "duration_seconds": 1200.0,
+    "magnitude": 0.5,
+    "parameters": {
+      "root_cause": "heater_contactor_stuck_closed",
+      "affected_parameter": "thermal_loop_temperature_c"
+    }
+  },
+  "expected_causal_sequence": [
+    {
+      "step": 1,
+      "timestamp": "2026-03-14T08:15:00+00:00",
+      "subsystem": "tcs",
+      "event_type": "heater_stuck_on",
+      "description": "Heater stuck on begins adding uncommanded heat.",
+      "evidence_ids": [
+        "evt_001"
+      ]
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-03-14T08:27:30+00:00",
+      "subsystem": "tcs",
+      "event_type": "thermal_overheat_critical",
+      "description": "Loop temperature exceeds critical limit.",
+      "evidence_ids": [
+        "evt_002"
+      ]
+    }
+  ]
+}

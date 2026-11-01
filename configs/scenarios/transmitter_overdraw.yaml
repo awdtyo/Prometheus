@@ -1,0 +1,23 @@
+id: transmitter_overdraw
+name: Transmitter Power Overdraw
+description: The RF transmitter draws excess current, sagging the bus and degrading
+  downlink signal quality.
+seed: 20260314
+mission_start_utc: '2026-03-14T08:00:00+00:00'
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+subsystems:
+- eps
+- tcs
+- adcs
+- comms
+- obc
+fault:
+  fault_type: power_degradation
+  target_subsystem: comms
+  start_met_seconds: 300.0
+  duration_seconds: 900.0
+  magnitude: 0.3
+telemetry_file: fixtures/telemetry/transmitter_overdraw_telemetry.csv
+event_log_json: fixtures/events/transmitter_overdraw_events.json
+event_log_csv: fixtures/events/transmitter_overdraw_events.csv

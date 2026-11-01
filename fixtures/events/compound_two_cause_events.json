@@ -1,0 +1,26 @@
+[
+  {
+    "timestamp": "2026-03-14T08:10:00+00:00",
+    "subsystem": "eps",
+    "event_type": "battery_cell_imbalance",
+    "description": "Battery cell imbalance begins; bus voltage sags.",
+    "severity": "medium",
+    "event_id": "evt_001"
+  },
+  {
+    "timestamp": "2026-03-14T08:30:00+00:00",
+    "subsystem": "tcs",
+    "event_type": "thermal_control_degraded",
+    "description": "Thermal control cannot hold battery setpoint.",
+    "severity": "medium",
+    "event_id": "evt_002"
+  },
+  {
+    "timestamp": "2026-03-14T08:40:00+00:00",
+    "subsystem": "tcs",
+    "event_type": "battery_temperature_high",
+    "description": "Battery temperature exceeds warning threshold.",
+    "severity": "high",
+    "event_id": "evt_003"
+  }
+]

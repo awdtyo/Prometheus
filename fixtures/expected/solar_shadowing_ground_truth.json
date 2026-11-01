@@ -1,0 +1,37 @@
+{
+  "scenario_id": "solar_shadowing",
+  "synthetic": true,
+  "injected_fault": {
+    "fault_type": "power_loss",
+    "target_subsystem": "eps",
+    "start_time": "2026-03-14T08:10:00+00:00",
+    "duration_seconds": 1800.0,
+    "magnitude": 0.35,
+    "parameters": {
+      "root_cause": "solar_array_shadowing",
+      "affected_parameter": "bus_voltage_v"
+    }
+  },
+  "expected_causal_sequence": [
+    {
+      "step": 1,
+      "timestamp": "2026-03-14T08:10:00+00:00",
+      "subsystem": "eps",
+      "event_type": "array_shadowing_started",
+      "description": "Solar array shadowing cuts generation; bus begins to sag.",
+      "evidence_ids": [
+        "evt_001"
+      ]
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-03-14T08:20:00+00:00",
+      "subsystem": "eps",
+      "event_type": "bus_undervoltage_critical",
+      "description": "Bus voltage crosses critical low; EPS sheds load.",
+      "evidence_ids": [
+        "evt_002"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "scenario_id": "reaction_wheel_degradation",
+  "synthetic": true,
+  "injected_fault": {
+    "fault_type": "actuator_failure",
+    "target_subsystem": "adcs",
+    "start_time": "2026-03-14T08:20:00+00:00",
+    "duration_seconds": 1500.0,
+    "magnitude": 0.4,
+    "parameters": {
+      "root_cause": "reaction_wheel_bearing_wear",
+      "affected_parameter": "attitude_error_deg"
+    }
+  },
+  "expected_causal_sequence": [
+    {
+      "step": 1,
+      "timestamp": "2026-03-14T08:20:00+00:00",
+      "subsystem": "adcs",
+      "event_type": "reaction_wheel_degraded",
+      "description": "Wheel degradation begins; control authority drops.",
+      "evidence_ids": [
+        "evt_001"
+      ]
+    },
+    {
+      "step": 2,
+      "timestamp": "2026-03-14T08:37:30+00:00",
+      "subsystem": "adcs",
+      "event_type": "attitude_error_critical",
+      "description": "Pointing error crosses critical limit.",
+      "evidence_ids": [
+        "evt_002"
+      ]
+    }
+  ]
+}

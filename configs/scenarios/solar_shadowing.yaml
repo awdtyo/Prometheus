@@ -1,0 +1,23 @@
+id: solar_shadowing
+name: Solar Array Shadowing
+description: An attitude excursion shadows the solar arrays, cutting generation and
+  sagging the main bus until attitude is recovered.
+seed: 20260314
+mission_start_utc: '2026-03-14T08:00:00+00:00'
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+subsystems:
+- eps
+- tcs
+- adcs
+- comms
+- obc
+fault:
+  fault_type: power_loss
+  target_subsystem: eps
+  start_met_seconds: 600.0
+  duration_seconds: 1800.0
+  magnitude: 0.35
+telemetry_file: fixtures/telemetry/solar_shadowing_telemetry.csv
+event_log_json: fixtures/events/solar_shadowing_events.json
+event_log_csv: fixtures/events/solar_shadowing_events.csv
