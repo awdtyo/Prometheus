@@ -15,7 +15,9 @@ export function CausalGraphPage() {
   const investigationId = searchParams.get("inv") || null;
   const [selected, setSelected] = useState<GraphNode | null>(null);
 
-  const { data: scenario } = useScenarioDetail(investigationId ? investigationId : null);
+  const isInvestigationId = investigationId?.startsWith("inv_");
+  const scenarioId = isInvestigationId ? null : investigationId;
+  const { data: scenario } = useScenarioDetail(scenarioId ?? null);
   const subsystems: SubsystemResponse[] = scenario?.subsystems ?? [];
 
   const [graph, setGraph] = useState<{ nodes: any[]; edges: any[] } | null>(null);
