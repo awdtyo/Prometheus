@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -48,6 +50,94 @@ class LLMCounters:
         self.cache_hits += 1
 
 
+_NODE_ID_RE = re.compile(r"\b(obs:[A-Za-z0-9_.-]+)\b|\b(evt:[A-Za-z0-9_.-]+)\b")
+
+
+def _node_subsystem(node_id: str) -> str | None:
+    """Best-effort subsystem for an observation id like ``obs_eps_...``.
+
+    Observation ids embed their subsystem as the second underscore token
+    (``obs_eps_battery_voltage_v_1`` -> ``eps``). Event ids carry no subsystem.
+    """
+    bare = node_id[len("obs:"):] if node_id.startswith("obs:") else node_id
+    parts = bare.split("_")
+    if len(parts) >= 2 and parts[0] == "obs":
+        return parts[1]
+    return None
+
+
+def _extract_node_ids(user: str) -> list[str]:
+    """Pull real node ids out of the agent prompt context so canned
+    hypotheses/evidence cite ids that actually exist."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _NODE_ID_RE.finditer(user):
+        nid = match.group(1) or match.group(2)
+        if nid and nid not in seen:
+            seen.add(nid)
+            found.append(nid)
+    return found
+
+
+def _nodes_by_subsystem(user: str) -> dict[str, list[str]]:
+    """Group extracted node ids by subsystem so competing hypotheses can
+    discuss different subsystems instead of all cloning the first one.
+
+    Event-derived observation ids (``obs_evt_evt_NNN``) carry no real
+    subsystem, so the spurious ``evt`` group is dropped.
+    """
+    grouped: dict[str, list[str]] = {}
+    for nid in _extract_node_ids(user):
+        sub = _node_subsystem(nid)
+        if sub is None or sub == "evt":
+            continue
+        grouped.setdefault(sub, []).append(nid)
+    return grouped
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _evidence_dict(source_id: str) -> dict[str, Any]:
+    return {
+        "evidence_id": "ev_canned_00",
+        "source_id": source_id,
+        "timestamp": _now_iso(),
+        "evidence_type": "observation",
+        "description": "canned evidence",
+        "supports_or_contradicts": "supports",
+        "reliability": 0.5,
+    }
+
+
+def _labelled_claim() -> dict[str, Any]:
+    return {"text": "canned claim", "label": "inference"}
+
+
+def _hypothesis_dict(user: str, index: int) -> dict[str, Any]:
+    grouped = _nodes_by_subsystem(user)
+    subsystems = list(grouped)
+    if subsystems:
+        sub = subsystems[index % len(subsystems)]
+        chain = [grouped[sub][0]]
+        anchor = chain[0]
+    else:
+        chain = ["obs:canned_001"]
+        anchor = chain[0]
+    return {
+        "hypothesis_id": f"hyp_canned_{index:02d}",
+        "title": f"canned hypothesis {index}",
+        "summary": "canned explanation",
+        "causal_chain": list(chain),
+        "evidence_ids": [anchor],
+        "contradiction_ids": [],
+        "assumptions": [],
+        "confidence": 0.5,
+        "score": 0.5,
+    }
+
+
 class FakeLLM:
     """Deterministic offline LLM returning schema-valid canned outputs."""
 
@@ -60,12 +150,38 @@ class FakeLLM:
         max_tokens: int,
         temperature: float,
     ) -> T:
-        # Build a minimal valid instance from the model's fields
-        data = _canned(response_model)
+        data = _canned(response_model, user)
         return response_model.model_validate(data)
 
 
-def _canned(model: type[BaseModel]) -> dict[str, Any]:
+def _canned(model: type[BaseModel], user: str = "") -> dict[str, Any]:
+    name = model.__name__
+
+    if name == "ProposerOutput":
+        return {"hypotheses": [_hypothesis_dict(user, i) for i in range(3)]}
+
+    if name == "Hypothesis":
+        return _hypothesis_dict(user, 0)
+
+    if name == "Evidence":
+        nodes = _extract_node_ids(user)
+        return _evidence_dict(nodes[0] if nodes else "obs:canned_001")
+
+    if name == "LabelledClaim":
+        return _labelled_claim()
+
+    if name == "ProsecutorOutput":
+        nodes = _extract_node_ids(user)
+        return {
+            "evidence": [_evidence_dict(nodes[0] if nodes else "obs:canned_001")],
+            "claims": [_labelled_claim()],
+        }
+
+    if name == "SkepticOutput":
+        # No verified contradiction data in canned mode: emit nothing so the
+        # orchestrator records no contradiction ids.
+        return {"evidence": []}
+
     result: dict[str, Any] = {}
     for name, field_info in model.model_fields.items():
         ann = field_info.annotation

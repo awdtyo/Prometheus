@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 from autopsy.schemas.evidence import Evidence
 from autopsy.schemas.graph import Graph
@@ -42,31 +42,41 @@ def _valid_ids(graph, observations, events) -> set[str]:
     return ids
 
 
-def _verify_evidence(evidence: list[Evidence], observations: list[Observation], valid_ids: set[str]) -> tuple[list[Evidence], list[Downgrade]]:
+def _verify_evidence(
+    evidence: list[Evidence],
+    observations: list[Observation],
+    valid_ids: set[str],
+) -> tuple[list[Evidence], list[Downgrade]]:
     obs_map = {o.observation_id: o for o in observations}
     downgrades: list[Downgrade] = []
     out = []
     for ev in evidence:
         if ev.source_id not in valid_ids:
-            # downgrade to speculation? evidence must cite; if invalid, mark contradicts? We'll keep but downgrade tag not applicable (Evidence has no tag). Record downgrade.
-            downgrades.append(Downgrade(ev.evidence_id, "evidence", "speculation", "unknown source id"))
+            # evidence cites an unknown source id; downgrade to speculation.
+            downgrades.append(
+                Downgrade(ev.evidence_id, "evidence", "speculation", "unknown source id")
+            )
             continue
         # check subsystem/time match for observations
         if ev.source_id in obs_map:
-            o = obs_map[ev.source_id]
             # if evidence claims subsystem mismatch -> downgrade
             # We can't parse claim text; assume match. Keep.
-        out.append(ev)
+            pass
     return out, downgrades
 
 
 def _chain_explains(h: Hypothesis, observations: list[Observation], graph: Graph) -> set[str]:
-    # fraction of observations whose subsystem appears in chain node labels
-    chain_text = " ".join(h.causal_chain).lower()
-    explained = set()
-    for o in observations:
-        if o.subsystem.lower() in chain_text or o.observation_id in chain_text:
-            explained.add(o.observation_id)
+    # Observations whose subsystem is referenced by the causal chain. Chain node
+    # ids may be canonical graph ids (``obs:obs_eps_battery_voltage_v_1``) or
+    # bare observation ids (``obs_eps_battery_voltage_v_1``); both are accepted.
+    obs_by_id = {o.observation_id: o for o in observations}
+    chain_subsystems: set[str] = set()
+    for node_id in h.causal_chain:
+        obs_id = node_id[len("obs:"):] if node_id.startswith("obs:") else node_id
+        obs = obs_by_id.get(obs_id)
+        if obs is not None:
+            chain_subsystems.add(obs.subsystem.lower())
+    explained = {o.observation_id for o in observations if o.subsystem.lower() in chain_subsystems}
     return explained
 
 
@@ -83,7 +93,8 @@ def score_hypotheses(hypotheses, evidence, graph, observations, config=None, eve
     for h in hypotheses:
         # explained observations
         explained = _chain_explains(h, observations, graph)
-        frac_explained = len(explained) / max(1, len(observations))
+        total = max(1, len(observations))
+        frac_explained = len(explained) / total
 
         # edge confidence along chain: map node->node edges
         edge_map = {(e.source, e.target): e for e in graph.edges}
@@ -120,14 +131,18 @@ def score_hypotheses(hypotheses, evidence, graph, observations, config=None, eve
         # unexplained downstream observations
         unexplained_downstream = len(observations) - len(explained)
 
-        # score
+        # score. Penalties are normalized per chain element so a single
+        # contradiction or missing edge cannot wipe out the whole score, and
+        # weights sum to one so the raw score stays in [0, 1] before clamping.
+        chain_len = max(1, len(h.causal_chain))
+        links = max(1, len(h.causal_chain) - 1)
         score = (
             cfg.w_explained * frac_explained
             + cfg.w_edge_conf * avg_edge
             + cfg.w_evidence * avg_evidence
-            - cfg.penalty_contradiction * contra_count
-            - cfg.penalty_unexplained_downstream * (unexplained_downstream / max(1, len(observations)))
-            - cfg.penalty_unsupported_link * unsupported
+            - cfg.penalty_contradiction * (contra_count / chain_len)
+            - cfg.penalty_unexplained_downstream * (unexplained_downstream / total)
+            - cfg.penalty_unsupported_link * (unsupported / links)
         )
         score = max(0.0, min(1.0, score))
 
@@ -150,12 +165,15 @@ def score_hypotheses(hypotheses, evidence, graph, observations, config=None, eve
 
     # summary
     tag_counts = {"evidence": 0, "inference": 0, "speculation": 0}
-    unexplained_ids = [o.observation_id for o in observations if o.observation_id not in set().union(*[set() for _ in []]) ]  # placeholder
-    # recompute unexplained globally (none of hypotheses explain) - keep simple
+    # recompute unexplained globally: observations no chain explains
     all_explained = set()
-    for h, explained in scored:
+    for _h, explained in scored:
         all_explained |= explained
-    unexplained_ids = [o.observation_id for o in observations if o.observation_id not in all_explained]
+    unexplained_ids = [
+        o.observation_id
+        for o in observations
+        if o.observation_id not in all_explained
+    ]
 
     summary = {
         "tag_counts": tag_counts,
@@ -163,4 +181,9 @@ def score_hypotheses(hypotheses, evidence, graph, observations, config=None, eve
         "num_hypotheses": len(hypotheses_sorted),
     }
 
-    return ScoredResult(hypotheses=hypotheses_sorted, evidence=verified_evidence, downgrades=downgrades, summary=summary)
+    return ScoredResult(
+        hypotheses=hypotheses_sorted,
+        evidence=verified_evidence,
+        downgrades=downgrades,
+        summary=summary,
+    )
