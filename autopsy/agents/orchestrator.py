@@ -79,7 +79,7 @@ def generate_hypotheses(graph, observations, events, specs, llm, config=None, pr
     ctx = _context_for(graph, observations, events, specs)
     calls = {"n": 0}
 
-    def call(model, system, user, rmodel, max_tokens=1024):
+    def call(model, system, user, rmodel, max_tokens=4096):
         if calls["n"] >= cfg.max_llm_calls:
             raise AgentError("budget exceeded")
         calls["n"] += 1
@@ -90,6 +90,23 @@ def generate_hypotheses(graph, observations, events, specs, llm, config=None, pr
     proposer_prompt = _load_prompt("proposer.md")
     proposer_out = call(ModelName.REASONING, proposer_prompt, ctx, ProposerOutput)
     hyps = proposer_out.hypotheses
+
+    # Safety net: every hypothesis must cite at least one supporting evidence id
+    # (schema requires non-empty evidence_ids). If the proposer left them empty,
+    # cite the first node of its causal chain as preliminary evidence.
+    for h in hyps:
+        if not h.evidence_ids and h.causal_chain:
+            h.evidence_ids = [h.causal_chain[0]]
+
+    # Keep only causal-chain node ids that actually exist in the provided
+    # context; drop hypotheses whose chain collapses to nothing valid.
+    valid_chain: list[Hypothesis] = []
+    for h in hyps:
+        kept = [nid for nid in h.causal_chain if nid in valid_ids]
+        if kept:
+            h.causal_chain = kept
+            valid_chain.append(h)
+    hyps = valid_chain
 
     all_evidence: list[Evidence] = []
 
