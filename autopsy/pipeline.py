@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Optional
 
+from autopsy.agents.orchestrator import generate_hypotheses
 from autopsy.analysis.scoring import score_hypotheses
-from autopsy.agents.orchestrator import generate_hypotheses, AgentConfig
 from autopsy.graph.builder import build_graph
-from autopsy.ingest.loaders import load_investigation_inputs, load_subsystem_specs
+from autopsy.ingest.loaders import load_investigation_inputs
 from autopsy.llm.client import LLMClient
 from autopsy.observations.extractor import extract_observations
-from autopsy.schemas.config import InvestigationConfig
 from autopsy.schemas.enums import RunStatus
-from autopsy.schemas.inputs import InvestigationInputs
 from autopsy.schemas.results import RunResult, RunTimestamps
 
 
@@ -32,7 +29,7 @@ ProgressCb = Callable[[str, str, float], None]
 def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=True):
     config = config
     progress = progress or (lambda s, m, f: None)
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     run_id = str(uuid.uuid4())
     scenario_id = getattr(inputs, "scenario_id", "unknown")
 
@@ -44,7 +41,7 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
     try:
         observations = extract_observations(inputs)
     except Exception as e:
-        raise PipelineError("ingesting", str(e))
+        raise PipelineError("ingesting", str(e)) from e
 
     # Stage 2: graph
     emit("graphing", "Building graph", 0.2)
@@ -60,7 +57,7 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
     try:
         graph = build_graph(observations, inputs.events, inputs.telemetry, specs)
     except Exception as e:
-        raise PipelineError("graphing", str(e))
+        raise PipelineError("graphing", str(e)) from e
 
     # Stage 3: agents (LLM)
     emit("analyzing", "Running agents", 0.4)
@@ -82,9 +79,9 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
             hyps = result_scored.hypotheses
             evs = result_scored.evidence
         except Exception as e:
-            raise PipelineError("scoring", str(e))
+            raise PipelineError("scoring", str(e)) from e
 
-    completed = datetime.now(timezone.utc)
+    completed = datetime.now(UTC)
     if llm_failed:
         status = RunStatus.FAILED
         # degraded: return graph+observations, hypotheses empty
@@ -95,10 +92,16 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
             observations=observations,
             graph=graph,
             hypotheses=[],
-            timestamps=RunTimestamps(created_at=created, started_at=created, completed_at=completed),
+            evidence=evs,
+            events=inputs.events,
+            timestamps=RunTimestamps(
+                created_at=created, started_at=created, completed_at=completed
+            ),
         )
         # attach warning via investigation_report
-        rr.investigation_report = f"LLM stage failed: {llm_err}; degraded result with graph and observations."
+        rr.investigation_report = (
+            f"LLM stage failed: {llm_err}; degraded result with graph and observations."
+        )
         emit("failed", "LLM stage failed; degraded", 1.0)
         return rr
 
@@ -109,7 +112,11 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
         observations=observations,
         graph=graph,
         hypotheses=hyps,
-        timestamps=RunTimestamps(created_at=created, started_at=created, completed_at=completed),
+        evidence=evs,
+        events=inputs.events,
+        timestamps=RunTimestamps(
+            created_at=created, started_at=created, completed_at=completed
+        ),
     )
     emit("completed", "Complete", 1.0)
     return rr

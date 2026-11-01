@@ -9,6 +9,8 @@ from pydantic import Field, field_validator, model_validator
 
 from autopsy.schemas.base import AutopsyModel, EntityId, UtcDatetime, ensure_unique
 from autopsy.schemas.enums import RunStatus
+from autopsy.schemas.events import MissionEvent
+from autopsy.schemas.evidence import Evidence
 from autopsy.schemas.graph import Graph
 from autopsy.schemas.hypotheses import Hypothesis
 from autopsy.schemas.observations import Observation
@@ -55,6 +57,14 @@ class RunResult(AutopsyModel):
     hypotheses: list[Hypothesis] = Field(
         default_factory=list,
         description="Competing hypotheses produced by the run.",
+    )
+    evidence: list[Evidence] = Field(
+        default_factory=list,
+        description="Evidence records produced by the run.",
+    )
+    events: list[MissionEvent] = Field(
+        default_factory=list,
+        description="Mission events produced by the run.",
     )
     investigation_report: str | None = Field(
         default=None,
