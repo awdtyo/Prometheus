@@ -45,6 +45,7 @@ class InvestigationResponse(ApiModel):
     progress: int = Field(ge=0, le=100)
     current_stage: str | None = None
     error_message: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: UtcDatetime
     updated_at: UtcDatetime
     completed_at: UtcDatetime | None = None

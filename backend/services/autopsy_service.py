@@ -342,6 +342,10 @@ class AutopsyInvestigationService:
                     resp.completed_at = completed_at
                 else:
                     resp.completed_at = parse_iso_z(completed_at)
+            # Surface demo metadata (mode, model, tokens) so the UI can show a mode banner.
+            meta = getattr(result, "_demo", None) or {}
+            if isinstance(meta, dict) and meta.get("mode"):
+                resp.metadata = {"mode": meta.get("mode"), "model": meta.get("models", {}).get("reasoning")}
         return resp
 
     def get(self, investigation_id: str) -> InvestigationResponse:

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 
 import {
@@ -7,7 +7,6 @@ import {
   subscribeToInvestigationProgress,
   problemFromError,
 } from "../api/client";
-import { Loading } from "../components/Loading";
 import { Empty } from "../components/Empty";
 import { FaultInjectionForm } from "../components/FaultInjectionForm";
 
@@ -15,9 +14,23 @@ import type { TimelineEvent } from "../types/api";
 
 export function InvestigationWorkspacePage() {
   const { id } = useParams<{ id: string }>();
-  const { data: investigation, error, isLoading } = useInvestigation(id ?? null);
+  const { data: investigation, error } = useInvestigation(id ?? null);
   const { data: timeline } = useTimeline(id ?? null);
 
+  // Check for replayed demo data stored in localStorage
+  const demoData = useMemo(() => {
+    if (!id) return null;
+    try {
+      const raw = localStorage.getItem("demo-investigation");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed.run_result;
+    } catch {
+      return null;
+    }
+  }, [id]);
+
+  const effectiveInvestigation = demoData ?? investigation;
   const events: TimelineEvent[] = timeline?.events ?? [];
   const [progressEvents, setProgressEvents] = useState<{
     investigation_id: string;
@@ -39,8 +52,28 @@ export function InvestigationWorkspacePage() {
     return () => sub.abort();
   }, [id]);
 
-  if (isLoading) return <Loading />;
-  if (error) {
+  // Replay progress events from demo data with short delays
+  useEffect(() => {
+    if (!demoData || !id) return;
+    const demoProgress = localStorage.getItem("demo-investigation-progress");
+    if (!demoProgress) return;
+    try {
+      const events = JSON.parse(demoProgress);
+      let i = 0;
+      const timer = setInterval(() => {
+        if (i >= events.length) {
+          clearInterval(timer);
+          return;
+        }
+        setProgressEvents((prev) => [...prev, events[i]]);
+        i++;
+      }, 400);
+      return () => clearInterval(timer);
+    } catch {
+      // ignore
+    }
+  }, [demoData, id]);
+  if (error && !effectiveInvestigation) {
     const p = problemFromError(error);
     return (
       <div style={pageStyles.container}>
@@ -98,6 +131,9 @@ export function InvestigationWorkspacePage() {
               {" | " + latestProgress.stage + " (" + latestProgress.progress + "%)"}
             </span>
           )}
+          <span style={pageStyles.modeBadge}>
+            {investigation.metadata?.mode ? `mode: ${investigation.metadata.mode}` : null}
+          </span>
         </div>
       </div>
 
@@ -148,7 +184,7 @@ export function InvestigationWorkspacePage() {
       </div>
 
       <div style={pageStyles.actions}>
-        <Link to={`/hypotheses?inv=${investigation.id}`}>View hypotheses</Link>
+        <Link to={`/hypotheses?inv=${effectiveInvestigation.id}`}>View hypotheses</Link>
         &nbsp;|&nbsp;
         <Link to="/causal-graph">Causal graph</Link>
         &nbsp;|&nbsp;
@@ -178,6 +214,16 @@ const pageStyles: Record<string, React.CSSProperties> = {
   statusDot: { width: 8, height: 8, borderRadius: "50%" },
   statusText: { fontFamily: "var(--mono)", fontSize: 0.85, fontWeight: 600 },
   progressText: { marginLeft: 10, fontFamily: "var(--mono)", fontSize: 0.8, color: "var(--muted)" },
+  modeBadge: {
+    marginLeft: 10,
+    fontSize: 0.75,
+    fontFamily: "var(--mono)",
+    color: "var(--accent-foreground)",
+    background: "rgba(240, 165, 43, 0.1)",
+    padding: "2px 8px",
+    borderRadius: 4,
+    border: "1px solid var(--accent)",
+  },
   section: { marginTop: 20 },
   sectionTitle: { margin: "0 0 10px", fontSize: 1, color: "var(--muted)", fontFamily: "var(--mono)" },
   timeline: { display: "flex", flexDirection: "column", gap: 8 },

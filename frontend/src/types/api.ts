@@ -109,6 +109,7 @@ export interface Investigation {
   progress: number;
   current_stage: string | null;
   error_message: string | null;
+  metadata: Record<string, any>;
   created_at: string;
   updated_at: string;
   completed_at: string | null;

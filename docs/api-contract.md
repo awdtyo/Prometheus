@@ -267,6 +267,85 @@ data: {"investigation_id":"inv_68ef911f11664a16888da495aafe4942","status":"compl
 Returns `404` before the stream starts when the investigation does not exist.
 Headers include `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
 
+### `GET /api/v1/investigations/{investigation_id}/graph`
+
+Return the reconstructed causal/temporal graph for one investigation.
+
+**Response** — `200 application/json`
+
+```json
+{
+  "nodes": [
+    {
+      "node_id": "obs:obs_eps_battery_voltage_v_1",
+      "node_type": "observation",
+      "label": "eps:threshold_breach",
+      "timestamp": "2026-10-30T12:00:00.000Z",
+      "metadata": { "subsystem": "eps", "severity": "medium", "source_ids": [...] }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "edg_0001",
+      "source": "obs:obs_eps_battery_voltage_v_1",
+      "target": "obs:obs_eps_bus_voltage_v_1",
+      "relationship_type": "OBSERVED_CORRELATION",
+      "confidence": 0.1728,
+      "evidence_ids": [],
+      "metadata": { "spec_allowed": false, "lag_seconds": 120 }
+    }
+  ]
+}
+```
+
+### `GET /api/v1/evaluation/{scenario_id}`
+
+Return evaluation metrics for a scenario, labelled by LLM mode.
+
+**Query parameters**
+
+- `mode` — `"fake"` or `"real"` (default `"fake"`)
+
+**Response** — `200 application/json`
+
+A JSON object keyed by metric name:
+
+```json
+{
+  "root_cause_accuracy": 1.0,
+  "fault_localization_accuracy": 1.0,
+  "causal_chain_accuracy": 0.3529,
+  "evidence_coverage": 0.2821,
+  "temporal_ordering_accuracy": 1.0,
+  "contradiction_handling": 1.0,
+  "unsupported_claim_rate": 0.0,
+  "runtime_seconds": 125.8079,
+  "evidence_weight": 0.3,
+  "consistency_weight": 0.3,
+  "coverage_weight": 0.4,
+  "contradiction_penalty": 0.002
+}
+```
+
+Returns `{}` when no evaluation results exist for the scenario/mode.
+
+### `GET /api/v1/demo/{scenario_id}`
+
+Return a recorded demo run result plus ordered progress events, for offline replay.
+
+**Response** — `200 application/json`
+
+```json
+{
+  "run_result": { ... full RunResult JSON ... },
+  "progress_events": [
+    { "investigation_id": "...", "stage": "ingesting", "progress": 0, "message": "...", "timestamp": "..." }
+  ]
+}
+```
+
+Returns `404` when no recorded demo exists for the scenario.
+
 ## Catalog
 
 ### `GET /api/v1/scenarios`

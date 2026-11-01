@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 
-import { useScenarios, useCreateInvestigation, problemFromError } from "../api/client";
+import { useScenarios, useCreateInvestigation, getDemo, problemFromError } from "../api/client";
 import { Loading } from "../components/Loading";
 import { Empty } from "../components/Empty";
 import type { ScenarioSummary } from "../types/api";
@@ -11,6 +11,7 @@ export function ScenariosPage() {
   const navigate = useNavigate();
   const { create, isLoading: creating, error: createError } = useCreateInvestigation();
   const [started, setStarted] = useState<string | null>(null);
+  const [replaying, setReplaying] = useState(false);
 
   const scenarios: ScenarioSummary[] = data?.items ?? [];
 
@@ -34,6 +35,24 @@ export function ScenariosPage() {
       setStarted(inv.id);
       navigate(`/investigation/${inv.id}`);
     });
+  };
+
+  const handleReplay = async () => {
+    setReplaying(true);
+    try {
+      const demo = await getDemo("battery_failure");
+      localStorage.setItem(
+        "demo-investigation",
+        JSON.stringify({
+          run_result: demo.run_result,
+          progress_events: demo.progress_events,
+        }),
+      );
+      navigate("/investigation/demo-battery-failure");
+    } catch (err) {
+      setReplaying(false);
+      console.error("Replay failed:", err);
+    }
   };
 
   return (
@@ -77,6 +96,21 @@ export function ScenariosPage() {
             </article>
           ))
         )}
+      </div>
+
+      <div style={pageStyles.section}>
+        <h3 style={pageStyles.sectionTitle}>Replay recorded demo</h3>
+        <p style={pageStyles.cardDesc}>
+          Replay a previously recorded real LLM run of the battery_failure scenario,
+          complete with progress events and full results.
+        </p>
+        <button
+          style={pageStyles.startButton}
+          disabled={replaying}
+          onClick={handleReplay}
+        >
+          {replaying ? "Replaying…" : "Replay recorded real run"}
+        </button>
       </div>
     </div>
   );
@@ -126,4 +160,12 @@ const pageStyles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     width: "100%",
   },
+  section: {
+    marginTop: 32,
+    padding: 16,
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    background: "var(--surface-raised)",
+  },
+  sectionTitle: { margin: "0 0 10px", fontSize: 1.1, color: "var(--muted)", fontFamily: "var(--mono)", textTransform: "uppercase", letterSpacing: "0.05em" },
 };
