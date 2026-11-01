@@ -650,6 +650,14 @@ Timeline events include `metadata` (a JSON object).
 `fault_localization_accuracy`, `causal_chain_accuracy`, `evidence_coverage`,
 `temporal_ordering_accuracy`, `contradiction_handling`, `unsupported_claim_rate`.
 
+Raw hypothesis scores (``Hypothesis.score``) can tie or near-tie when several
+hypotheses reference the same subsystem. For display and ranking the UI should
+use a presentation-level **relative support share** --- each hypothesis's
+verified supporting-evidence reliability divided by the total verified
+reliability --- rather than the raw score alone. Raw scores are retained in
+``RunResult``; the relative support share is a derived display value (see
+``docs/evaluation.md``).
+
 ### g. Source of truth
 
 `autopsy/schemas/` is the source of truth for domain objects.
