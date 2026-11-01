@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.115",
     "networkx>=3.3",
     "numpy>=1.26",
+    "openai>=1.40",
     "pandas>=2.2",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
