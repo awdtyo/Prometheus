@@ -1,0 +1,16 @@
+{
+  "mode": "fake",
+  "provider": "groq",
+  "models": {
+    "reasoning": "openai/gpt-oss-120b",
+    "fast": "openai/gpt-oss-20b",
+    "alt": "qwen/qwen3.8-27b"
+  },
+  "tokens_in": 0,
+  "tokens_out": 0,
+  "calls": 7,
+  "duration_seconds": 0.0,
+  "recorded_at": "2026-11-01T11:46:06.399183+00:00",
+  "scenario": "battery_failure",
+  "note": "fake-recorded demo; real variant under fixtures/demo/battery_failure/"
+}

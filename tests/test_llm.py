@@ -17,6 +17,7 @@ from autopsy.llm import (
     complete_json,
 )
 from autopsy.llm.cache import DiskCache, cache_key
+from autopsy.llm.client import FakeLLM, llm_environment_ok
 from autopsy.llm.limiter import RateLimiter
 
 
@@ -131,3 +132,87 @@ def test_disk_cache_roundtrip(tmp_path):
     c.set("k", {"x": 1})
     assert c.get("k") == {"x": 1}
     assert c.get("missing") is None
+
+
+def test_cache_key_includes_mode_and_is_never_shared(tmp_path):
+    """A cache entry written under ``mode=fake`` must not be served to a real
+    request for the same model/prompt, and vice versa: the mode (and provider
+    and schema name) are part of the cache key."""
+    from autopsy.agents.models import ProposerOutput
+
+    cfg = LLMConfig(fake=True, cache_dir=tmp_path / "cache")
+    fake_client = LLMClient(cfg)
+    user = "NODES:\nobs:obs_001: eps:foo\nevt:evt_001: eps:bar\n"
+    fake_client.complete_json("m", "sys", user, ProposerOutput, max_tokens=1024, temperature=0.0)
+    assert len(fake_client.counters.per_model) == 1
+
+    # Exactly one cache file, carrying mode=fake.
+    files = list((tmp_path / "cache").iterdir())
+    assert len(files) == 1
+    entry = json.loads(files[0].read_text())
+    assert entry["mode"] == "fake"
+    assert "value" in entry
+
+    # Same model/prompt yields a different key under real mode.
+    params = {"max_tokens": 1024, "temperature": 0.0}
+    k_fake = cache_key(
+        "m", "sys", user, params, mode="fake", provider="groq", schema="ProposerOutput"
+    )
+    k_real = cache_key(
+        "m", "sys", user, params, mode="real", provider="groq", schema="ProposerOutput"
+    )
+    assert k_fake != k_real
+    assert fake_client._cache.get(k_real) is None  # real-mode key misses the fake entry
+
+    # Real client cannot be built without a key (clear error, never fake data).
+    try:
+        LLMClient(LLMConfig(fake=False))
+        raised = False
+    except AuthenticationError:
+        raised = True
+    assert raised
+
+
+def test_all_agent_models_validate_with_fake_llm():
+    from autopsy.agents.models import (
+        LabelledClaim,
+        ProposerOutput,
+        ProsecutorOutput,
+        SkepticOutput,
+    )
+    from autopsy.schemas.evidence import Evidence
+    from autopsy.schemas.hypotheses import Hypothesis
+
+    fake = FakeLLM()
+    ctx = "NODES:\nobs:obs_001: eps:foo\nevt:evt_001: eps:bar\n"
+    for model in [
+        ProposerOutput,
+        Hypothesis,
+        Evidence,
+        LabelledClaim,
+        ProsecutorOutput,
+        SkepticOutput,
+    ]:
+        obj = fake.complete("m", "sys", ctx, model, 1024, 0.0)
+        assert isinstance(obj, model), f"{model.__name__} did not validate"
+
+
+def test_llm_environment_ok():
+
+    # openai is installed and a client can be constructed (http_client workaround).
+    assert llm_environment_ok() is None
+
+
+def test_proposer_produces_min_three_hypotheses(tmp_path):
+    from autopsy.agents.models import ProposerOutput
+
+    cfg = LLMConfig(fake=True, cache_dir=tmp_path / "cache")
+    client = LLMClient(cfg)
+    user = "NODES:\nobs:obs_001: eps:foo\n"
+    result = client.complete_json("m", "sys", user, ProposerOutput, 1024, 0.0)
+    assert 3 <= len(result.hypotheses) <= 4
+    for h in result.hypotheses:
+        assert len(h.causal_chain) >= 1
+        assert len(h.evidence_ids) >= 1
+        assert 0.0 <= h.confidence <= 1.0
+        assert 0.0 <= h.score <= 1.0

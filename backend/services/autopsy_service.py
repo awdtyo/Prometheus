@@ -1,22 +1,28 @@
 """Real investigation service backed by the autopsy pipeline.
 
 Implements ``backend.services.interfaces.InvestigationService``. In real mode
-(``MISSION_AUTOPSY_USE_MOCK_SERVICES=false``) it runs the autopsy pipeline for
-runs and falls back to the backend scenario catalog for scenario/subsystem
-metadata.
+(``MISSION_AUTOPSY_USE_MOCK_SERVICES=false``) every investigation/run executes
+``autopsy.pipeline.run_scenario`` in a worker thread through the job queue,
+bridges pipeline progress callbacks into the SSE stream thread-safely, and
+persists the resulting ``RunResult`` in the DB layer (``investigations.result_json``).
+Hypotheses, timeline, observations, graph and results are served from the
+persisted ``RunResult``.
 """
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
-from autopsy.llm.client import LLMClient
-from backend.db import investigations as repository
-from backend.db import runs as run_repository
-from backend.db.investigations import InvestigationRecord
+from autopsy.pipeline import run_scenario
+from backend.db import investigations as inv_repo
+from backend.db import runs as run_repo
+from backend.db.database import connect
+from backend.db.investigations import InvestigationRecord, update_investigation_status
 from backend.db.runs import RunRecord
 from backend.exceptions import BadRequestError, NotFoundError
 from backend.scenarios import (
@@ -30,6 +36,7 @@ from backend.scenarios import (
 from backend.schemas.catalog import (
     FaultConfig,
     FaultOptionResponse,
+    FaultType,
     ScenarioDetailResponse,
     ScenarioInjectionResponse,
     ScenarioListResponse,
@@ -134,23 +141,78 @@ def _scenario_detail(definition: ScenarioDefinition) -> ScenarioDetailResponse:
     )
 
 
+def _hypothesis_response(hyp: Any) -> HypothesisResponse:
+    return HypothesisResponse(
+        hypothesis_id=hyp.hypothesis_id,
+        title=hyp.title,
+        summary=hyp.summary,
+        causal_chain=list(hyp.causal_chain),
+        evidence_ids=list(hyp.evidence_ids),
+        contradiction_ids=list(hyp.contradiction_ids),
+        assumptions=list(hyp.assumptions),
+        confidence=hyp.confidence,
+        score=hyp.score,
+    )
+
+
+def _result_to_timeline(result: Any, started: Any) -> TimelineResponse:
+    """Build a chronological timeline from the pipeline's observations/events."""
+    events: list[TimelineEventResponse] = []
+    observations = list(getattr(result, "observations", []) or [])
+    observations.sort(key=lambda o: o.timestamp)
+    for obs in observations[:8]:
+        events.append(
+            TimelineEventResponse(
+                event_id=f"evt_result_{obs.observation_id}",
+                timestamp=obs.timestamp,
+                subsystem=obs.subsystem,
+                event_type=obs.observation_type,
+                description=obs.description,
+                severity=obs.severity,
+                metadata={"observation_id": obs.observation_id},
+            )
+        )
+    if not events:
+        events.append(
+            TimelineEventResponse(
+                event_id=f"evt_result_{str(uuid.uuid4().hex)[:8]}",
+                timestamp=started,
+                subsystem="system",
+                event_type="investigation_started",
+                description="Investigation started.",
+                severity="info",
+                metadata={},
+            )
+        )
+    return TimelineResponse(investigation_id="", events=events)
+
+
 class AutopsyInvestigationService:
     """Real implementation of the investigation service contract."""
 
     def __init__(
         self,
         database_path: Path,
-        llm: LLMClient | None = None,
+        llm: Any | None = None,
         job_queue: JobQueue | None = None,
     ) -> None:
         self._database_path = database_path
         self._llm = llm
         self._job_queue = job_queue or InMemoryJobQueue()
+        self._lock = threading.RLock()
+        # In-process result cache keyed by investigation id. The authoritative
+        # copy is also persisted to ``investigations.result_json``.
+        self._results: dict[str, Any] = {}
+        self._progress: dict[str, list[dict[str, Any]]] = {}
 
+    # ------------------------------------------------------------------ create
     def create(self, payload: InvestigationCreate) -> InvestigationResponse:
         scenario_id = payload.scenario_id.strip()
         if not scenario_id:
             raise BadRequestError("scenario_id must not be blank.")
+        # The autopsy pipeline reads scenarios from configs/scenarios; validate
+        # against those so the API scenario ids match the CLI (`autopsy run <id>`).
+        self._require_autopsy_scenario(scenario_id)
 
         now = to_iso_z(utc_now())
         identifier = f"inv_{uuid.uuid4().hex}"
@@ -158,167 +220,149 @@ class AutopsyInvestigationService:
             id=identifier,
             scenario_id=scenario_id,
             title=payload.title or f"Investigation of {scenario_id}",
-            description=payload.description or "Investigation via the autopsy pipeline.",
-            fault_type=payload.fault_type or "unknown",
-            status=InvestigationStatus.COMPLETED.value,
-            progress=100,
-            current_stage="completed",
+            description=payload.description
+            or "Investigation executed by the autopsy pipeline.",
+            fault_type=(payload.fault_type or "unknown"),
+            status=InvestigationStatus.RUNNING.value,
+            progress=0,
+            current_stage="ingesting",
             error_message=None,
             created_at=now,
             updated_at=now,
-            completed_at=now,
+            completed_at=None,
         )
-        repository.insert_investigation(self._database_path, record)
-        return _record_to_response(record)
+        inv_repo.insert_investigation(self._database_path, record)
+        with self._lock:
+            self._progress[identifier] = []
 
+        self._job_queue.enqueue(identifier)
+        thread = threading.Thread(
+            target=self._run_pipeline,
+            args=(identifier, scenario_id, payload),
+            daemon=True,
+        )
+        thread.start()
+        return InvestigationResponse(
+            id=identifier,
+            scenario_id=scenario_id,
+            title=record.title,
+            description=record.description,
+            fault_type=record.fault_type,
+            status=InvestigationStatus.RUNNING,
+            progress=0,
+            current_stage="ingesting",
+            error_message=None,
+            created_at=parse_iso_z(now),
+            updated_at=parse_iso_z(now),
+            completed_at=None,
+        )
+
+    # ------------------------------------------------------------------ list / get
     def list(self, *, limit: int, cursor: str | None = None) -> InvestigationListResponse:
         decoded = None
         if cursor:
             try:
-                decoded = repository.decode_cursor(cursor)
+                decoded = inv_repo.decode_cursor(cursor)
             except ValueError as exc:
                 raise BadRequestError(
                     "The pagination cursor is invalid or expired.",
                     code="invalid_cursor",
                 ) from exc
 
-        records, has_more = repository.list_investigations(
+        records, has_more = inv_repo.list_investigations(
             self._database_path,
             limit=limit,
             cursor=decoded,
         )
-        next_cursor = repository.encode_cursor(records[-1]) if has_more and records else None
+        next_cursor = inv_repo.encode_cursor(records[-1]) if has_more and records else None
         return InvestigationListResponse(
-            items=[_record_to_response(record) for record in records],
+            items=[self._record_to_response_with_result(record) for record in records],
             next_cursor=next_cursor,
         )
 
-    def get(self, investigation_id: str) -> InvestigationResponse:
-        return _record_to_response(self._require(investigation_id))
+    def _record_to_response_with_result(self, record: InvestigationRecord) -> InvestigationResponse:
+        resp = _record_to_response(record)
+        with self._lock:
+            result = self._results.get(record.id)
+        if result is not None:
+            resp.status = InvestigationStatus.COMPLETED
+            resp.progress = 100
+            resp.current_stage = "completed"
+            completed_at = getattr(result.timestamps, "completed_at", None)
+            if completed_at is not None:
+                if isinstance(completed_at, datetime):
+                    resp.completed_at = completed_at
+                else:
+                    resp.completed_at = parse_iso_z(completed_at)
+        return resp
 
+    def get(self, investigation_id: str) -> InvestigationResponse:
+        record = inv_repo.get_investigation(self._database_path, investigation_id)
+        if record is None:
+            raise NotFoundError("Investigation", investigation_id)
+        return self._record_to_response_with_result(record)
+
+    # --------------------------------------------------------------- hypotheses
     def hypotheses(self, investigation_id: str) -> HypothesisListResponse:
-        record = self._require(investigation_id)
-        suffix = record.id.removeprefix("inv_")[-8:]
-        hypotheses = [
-            HypothesisResponse(
-                hypothesis_id=f"hyp_{suffix}_01",
-                title="Battery heater stuck on drained the power bus",
-                summary=(
-                    "A failed heater switch kept the battery heater energized, "
-                    "depleting the battery and sagging the main bus voltage."
-                ),
-                causal_chain=[
-                    "Heater switch failed closed",
-                    "Battery heater stayed energized",
-                    "Battery state of charge fell",
-                    "Main bus voltage dropped below the safe limit",
-                ],
-                evidence_ids=[f"ev_{suffix}_01", f"ev_{suffix}_02"],
-                contradiction_ids=[],
-                assumptions=["Battery state of health was nominal before the fault"],
-                confidence=0.82,
-                score=0.79,
-            ),
-            HypothesisResponse(
-                hypothesis_id=f"hyp_{suffix}_02",
-                title="Solar array shadowing reduced power generation",
-                summary=(
-                    "An attitude excursion shadowed the solar arrays, reducing "
-                    "generation and causing the observed undervoltage."
-                ),
-                causal_chain=[
-                    "Attitude excursion changed array illumination",
-                    "Solar array output dropped",
-                    "Battery supplied the shortfall",
-                    "Bus voltage sagged",
-                ],
-                evidence_ids=[f"ev_{suffix}_03"],
-                contradiction_ids=[f"ev_{suffix}_04"],
-                assumptions=["Array pointing telemetry is accurate"],
-                confidence=0.61,
-                score=0.55,
-            ),
-            HypothesisResponse(
-                hypothesis_id=f"hyp_{suffix}_03",
-                title="Bus voltage sensor drift produced a false low reading",
-                summary=(
-                    "The undervoltage telemetry may be a sensor artifact rather "
-                    "than a physical power failure."
-                ),
-                causal_chain=[
-                    "Voltage sensor drifted out of calibration",
-                    "Reported bus voltage fell",
-                    "Threshold monitor raised an alert",
-                ],
-                evidence_ids=[f"ev_{suffix}_05"],
-                contradiction_ids=[f"ev_{suffix}_02", f"ev_{suffix}_06"],
-                assumptions=["No independent voltage measurement is available"],
-                confidence=0.32,
-                score=0.24,
-            ),
-        ]
-        return HypothesisListResponse(
-            investigation_id=record.id,
-            hypotheses=sorted(hypotheses, key=lambda h: h.score, reverse=True),
+        self._require(investigation_id)
+        with self._lock:
+            result = self._results.get(investigation_id)
+        if result is None:
+            # Pipeline not finished yet: return what has been produced so far.
+            return HypothesisListResponse(investigation_id=investigation_id, hypotheses=[])
+        hyps = sorted(
+            (_hypothesis_response(h) for h in result.hypotheses),
+            key=lambda h: h.score,
+            reverse=True,
+        )
+        return HypothesisListResponse(investigation_id=investigation_id, hypotheses=hyps)
+
+    # ------------------------------------------------------------------- timeline
+    def timeline(self, investigation_id: str) -> TimelineResponse:
+        self._require(investigation_id)
+        with self._lock:
+            result = self._results.get(investigation_id)
+        started = utc_now()
+        if result is not None:
+            tl = _result_to_timeline(result, started)
+            tl.investigation_id = investigation_id
+            return tl
+        record = inv_repo.get_investigation(self._database_path, investigation_id)
+        started = parse_iso_z(record.created_at)
+        return TimelineResponse(
+            investigation_id=investigation_id,
+            events=[
+                TimelineEventResponse(
+                    event_id=f"evt_{investigation_id[-8:]}_01",
+                    timestamp=started,
+                    subsystem="system",
+                    event_type="investigation_started",
+                    description="Investigation started; pipeline still running.",
+                    severity="info",
+                    metadata={},
+                )
+            ],
         )
 
-    def timeline(self, investigation_id: str) -> TimelineResponse:
-        record = self._require(investigation_id)
-        started = parse_iso_z(record.created_at)
-        events = [
-            TimelineEventResponse(
-                event_id=f"evt_{record.id[-8:]}_01",
-                timestamp=started,
-                subsystem="command-and-data-handling",
-                event_type="scenario_replay_started",
-                description="Scenario replay began with the recorded mission inputs.",
-                severity="info",
-                metadata={"scenario_id": record.scenario_id},
-            ),
-            TimelineEventResponse(
-                event_id=f"evt_{record.id[-8:]}_02",
-                timestamp=started + timedelta(seconds=30),
-                subsystem="power",
-                event_type="telemetry_anomaly_detected",
-                description="Bus voltage moved outside its nominal operating band.",
-                severity="medium",
-                metadata={"parameter": "bus_voltage"},
-            ),
-            TimelineEventResponse(
-                event_id=f"evt_{record.id[-8:]}_03",
-                timestamp=started + timedelta(seconds=45),
-                subsystem="thermal-control",
-                event_type="heater_current_high",
-                description="Battery heater current remained elevated after the expected cutoff.",
-                severity="high",
-                metadata={"parameter": "heater_current"},
-            ),
-            TimelineEventResponse(
-                event_id=f"evt_{record.id[-8:]}_04",
-                timestamp=started + timedelta(seconds=60),
-                subsystem="power",
-                event_type="bus_undervoltage",
-                description="Main bus voltage fell below the safe operating limit.",
-                severity="critical",
-                metadata={"limit_v": 26.0},
-            ),
-        ]
-        return TimelineResponse(investigation_id=record.id, events=events)
-
+    # -------------------------------------------------------------------- SSE
     def stream_progress(self, investigation_id: str) -> Iterator[ProgressEvent]:
-        record = self._require(investigation_id)
-        terminal_status = InvestigationStatus(record.status)
-        for index, (stage, progress, message) in enumerate(_STAGES):
-            is_last = index == len(_STAGES) - 1
+        self._require(investigation_id)
+        with self._lock:
+            events = list(self._progress.get(investigation_id, []))
+            result = self._results.get(investigation_id)
+        for event in events:
+            yield ProgressEvent.model_validate(event)
+        if result is not None:
             yield ProgressEvent(
-                investigation_id=record.id,
-                status=terminal_status if is_last else InvestigationStatus.RUNNING,
-                stage=stage,
-                progress=progress,
-                message=message,
+                investigation_id=investigation_id,
+                status=InvestigationStatus.COMPLETED,
+                stage="completed",
+                progress=100,
+                message="Investigation complete.",
                 timestamp=utc_now(),
             )
 
+    # ------------------------------------------------------------------- catalog
     def scenarios(self) -> ScenarioListResponse:
         return ScenarioListResponse(
             items=[_scenario_summary(scenario) for scenario in list_scenarios()]
@@ -348,12 +392,28 @@ class AutopsyInvestigationService:
             items=[_subsystem_response(subsystem) for subsystem in list_subsystems()]
         )
 
+    # -------------------------------------------------------------------- runs
     def create_run(self, payload: RunCreate) -> RunResponse:
-        scenario = self._require_scenario(payload.scenario_id)
+        scenario_id = payload.scenario_id.strip()
+        # The autopsy pipeline reads scenarios from configs/scenarios; validate
+        # against those so the API scenario ids match the CLI.
+        self._require_autopsy_scenario(scenario_id)
+        # Catalog scenario (for fault metadata) may not exist for autopsy-only
+        # scenarios; fall back to a sensible default fault configuration.
+        scenario = get_scenario(scenario_id)
         requested = payload.resolved_investigation_config
-        fault_config = self._validate_fault(
-            scenario, requested.fault_config or self._default_fault(scenario)
-        )
+        if scenario is not None:
+            fault_config = self._validate_fault(
+                scenario, requested.fault_config or self._default_fault(scenario)
+            )
+        else:
+            fault_config = requested.fault_config or FaultConfig(
+                fault_type=FaultType.POWER_DEGRADATION,
+                target_subsystem="eps",
+                start_time=utc_now(),
+                duration_seconds=120.0,
+                magnitude=25.0,
+            )
         config = InvestigationConfig(
             fault_config=fault_config,
             agent_config=requested.agent_config,
@@ -364,7 +424,6 @@ class AutopsyInvestigationService:
         timestamp = to_iso_z(now)
         run_id = f"run_{uuid.uuid4().hex}"
         title = payload.title or f"{scenario.name} investigation"
-        message = "Investigation queued."
         record = RunRecord(
             run_id=run_id,
             scenario_id=scenario.id,
@@ -372,7 +431,7 @@ class AutopsyInvestigationService:
             title=title,
             config_json=config.model_dump_json(),
             fault_config_json=fault_config.model_dump_json(),
-            message=message,
+            message="Investigation queued.",
             created_at=timestamp,
             updated_at=timestamp,
             queued_at=timestamp,
@@ -380,7 +439,7 @@ class AutopsyInvestigationService:
             completed_at=None,
             error_message=None,
         )
-        run_repository.insert_run(self._database_path, record)
+        run_repo.insert_run(self._database_path, record)
         queue_position = self._job_queue.enqueue(run_id)
         return RunResponse(
             run_id=run_id,
@@ -392,9 +451,105 @@ class AutopsyInvestigationService:
             queue_position=queue_position,
             created_at=now,
             queued_at=now,
-            message=message,
+            message="Investigation queued.",
         )
 
+    # ------------------------------------------------------------ pipeline worker
+    def _run_pipeline(
+        self,
+        investigation_id: str,
+        scenario_id: str,
+        payload: InvestigationCreate,
+    ) -> None:
+
+        def emit(stage: str, message: str, fraction: float) -> None:
+            progress = int(fraction * 100)
+            event = {
+                "investigation_id": investigation_id,
+                "status": "running",
+                "stage": stage,
+                "progress": progress,
+                "message": message,
+                "timestamp": utc_now(),
+            }
+            with self._lock:
+                self._progress.setdefault(investigation_id, []).append(event)
+            update_investigation_status(
+                self._database_path,
+                investigation_id,
+                status=InvestigationStatus.RUNNING.value,
+                progress=progress,
+                current_stage=stage,
+                updated_at=to_iso_z(utc_now()),
+            )
+
+        try:
+            result = run_scenario(
+                scenario_id,
+                llm=self._llm,
+                progress=emit,
+            )
+            with self._lock:
+                self._results[investigation_id] = result
+                if investigation_id in self._progress:
+                    self._progress[investigation_id].append(
+                        {
+                            "investigation_id": investigation_id,
+                            "status": "completed",
+                            "stage": "completed",
+                            "progress": 100,
+                            "message": "Investigation complete.",
+                            "timestamp": utc_now(),
+                        }
+                    )
+            # Persist the RunResult to the DB layer.
+            result_json = result.model_dump_json()
+            completed_at = to_iso_z(
+                result.timestamps.completed_at
+                if getattr(result.timestamps, "completed_at", None)
+                else utc_now()
+            )
+            with connect(self._database_path) as connection:
+                connection.execute(
+                    """
+                    UPDATE investigations
+                    SET status = ?, progress = 100, current_stage = 'completed',
+                        updated_at = ?, completed_at = ?, result_json = ?
+                    WHERE id = ?
+                    """,
+                    (completed_at, completed_at, result_json, investigation_id),
+                )
+        except Exception as exc:  # noqa: BLE001
+            error_message = str(exc)
+            with self._lock:
+                self._progress.setdefault(investigation_id, []).append(
+                    {
+                        "investigation_id": investigation_id,
+                        "status": "failed",
+                        "stage": "failed",
+                        "progress": 100,
+                        "message": f"Investigation failed: {error_message}",
+                        "timestamp": utc_now(),
+                    }
+                )
+            with connect(self._database_path) as connection:
+                connection.execute(
+                    """
+                    UPDATE investigations
+                    SET status = ?, progress = 100, current_stage = 'failed',
+                        error_message = ?, updated_at = ?, completed_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        InvestigationStatus.FAILED.value,
+                        error_message,
+                        to_iso_z(utc_now()),
+                        to_iso_z(utc_now()),
+                        investigation_id,
+                    ),
+                )
+
+    # ------------------------------------------------------------ fault helpers
     def _default_fault(self, scenario: ScenarioDefinition) -> FaultConfig:
         option = scenario.fault_options[0]
         offset = min(30.0, scenario.duration_seconds / 10)
@@ -466,8 +621,16 @@ class AutopsyInvestigationService:
             raise NotFoundError("Scenario", scenario_id)
         return scenario
 
+    def _require_autopsy_scenario(self, scenario_id: str) -> None:
+        """Validate that the scenario exists for the autopsy pipeline
+        (configs/scenarios/<id>.yaml), so API scenario ids match the CLI."""
+        from pathlib import Path
+
+        if not Path(f"configs/scenarios/{scenario_id}.yaml").exists():
+            raise NotFoundError("Scenario", scenario_id)
+
     def _require(self, investigation_id: str) -> InvestigationRecord:
-        record = repository.get_investigation(self._database_path, investigation_id)
+        record = inv_repo.get_investigation(self._database_path, investigation_id)
         if record is None:
             raise NotFoundError("Investigation", investigation_id)
         return record

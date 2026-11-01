@@ -1,5 +1,5 @@
 {
-  "run_id": "47eed48f-6520-432f-9969-5d44d1ac4cd2",
+  "run_id": "94573b3d-ca56-4295-9405-5b47fb058fb5",
   "scenario_id": "battery-failure",
   "status": "completed",
   "observations": [
@@ -18383,78 +18383,166 @@
   },
   "hypotheses": [
     {
-      "hypothesis_id": "hyp_canned_00",
-      "title": "canned hypothesis 0",
-      "summary": "canned explanation",
+      "hypothesis_id": "h1",
+      "title": "EPS battery cell imbalance cascade",
+      "summary": "Battery cell imbalance caused voltage sag, triggering load shedding and reduced power that propagated failures across subsystems.",
       "causal_chain": [
-        "obs:obs_eps_battery_voltage_v_1",
-        "obs:obs_eps_battery_current_a_1",
-        "obs:obs_eps_bus_voltage_v_1"
+        "obs_evt_evt_003",
+        "evt_003",
+        "obs_evt_evt_005",
+        "evt_005",
+        "obs_evt_evt_006",
+        "evt_006",
+        "obs_evt_evt_008",
+        "evt_008",
+        "obs_comms_signal_to_noise_db_1",
+        "obs_adcs_attitude_error_deg_1",
+        "obs_obc_cpu_load_pct_1"
       ],
       "evidence_ids": [
-        "ev_canned_00"
+        "ev_1",
+        "ev_2",
+        "ev_3",
+        "ev_4",
+        "ev_5",
+        "ev_6",
+        "ev_7",
+        "ev_8",
+        "ev_9",
+        "ev_10",
+        "ev_11"
       ],
       "contradiction_ids": [
-        "ev_canned_00"
+        "ev_1",
+        "ev_2",
+        "ev_3"
       ],
       "assumptions": [
-        "REJECTED: contradicted by 1 verified evidence; 1 unsupported links"
+        "The observed events accurately reflect the underlying physical state",
+        "Load shedding directly reduces power available to all downstream subsystems",
+        "REJECTED: contradicted by 3 evidence; 10 unsupported links"
       ],
-      "confidence": 0.25,
+      "confidence": 0.43,
       "score": 0.0
     },
     {
-      "hypothesis_id": "hyp_canned_01",
-      "title": "canned hypothesis 1",
-      "summary": "canned explanation",
+      "hypothesis_id": "h2",
+      "title": "Comms antenna temperature telemetry fault",
+      "summary": "A spurious antenna temperature spike in telemetry caused the thermal control system to shed heater power, reducing power availability and degrading communications.",
       "causal_chain": [
-        "obs:obs_eps_battery_voltage_v_1",
-        "obs:obs_eps_battery_current_a_1",
-        "obs:obs_eps_bus_voltage_v_1"
+        "obs_comms_antenna_temperature_c_1",
+        "obs_evt_evt_007",
+        "evt_007",
+        "obs_evt_evt_008",
+        "evt_008",
+        "obs_comms_signal_to_noise_db_1"
       ],
       "evidence_ids": [
-        "ev_canned_00"
+        "ev_1",
+        "ev_2",
+        "ev_3",
+        "ev_4",
+        "ev_5"
       ],
       "contradiction_ids": [
-        "ev_canned_00"
+        "ev_1",
+        "ev_2",
+        "ev_3"
       ],
       "assumptions": [
-        "REJECTED: contradicted by 1 verified evidence; 1 unsupported links"
+        "The antenna temperature reading is erroneous (sensor/telemetry fault)",
+        "Thermal control reacts to the faulty temperature by shedding heater power",
+        "REJECTED: contradicted by 3 evidence; 5 unsupported links"
       ],
-      "confidence": 0.25,
+      "confidence": 0.39,
       "score": 0.0
     },
     {
-      "hypothesis_id": "hyp_canned_02",
-      "title": "canned hypothesis 2",
-      "summary": "canned explanation",
+      "hypothesis_id": "h3",
+      "title": "OBC CPU overload leading to safe mode",
+      "summary": "Excessive CPU load on the OBC triggered watchdog resets and forced entry into safe mode, halting mission operations.",
       "causal_chain": [
-        "obs:obs_eps_battery_voltage_v_1",
-        "obs:obs_eps_battery_current_a_1",
-        "obs:obs_eps_bus_voltage_v_1"
+        "obs_obc_cpu_load_pct_1",
+        "evt_012",
+        "obs_evt_evt_013",
+        "evt_013",
+        "obs_evt_evt_014",
+        "evt_014",
+        "obs_evt_evt_019"
       ],
       "evidence_ids": [
-        "ev_canned_00"
+        "ev_1",
+        "ev_2",
+        "ev_3",
+        "ev_4",
+        "ev_5",
+        "ev_6"
       ],
       "contradiction_ids": [
-        "ev_canned_00"
+        "ev_1",
+        "ev_2"
       ],
       "assumptions": [
-        "REJECTED: contradicted by 1 verified evidence; 1 unsupported links"
+        "High CPU load directly causes watchdog resets",
+        "Safe\u2011mode entry follows a watchdog reset",
+        "REJECTED: contradicted by 2 evidence; 6 unsupported links"
       ],
-      "confidence": 0.25,
+      "confidence": 0.405,
+      "score": 0.0
+    },
+    {
+      "hypothesis_id": "h4",
+      "title": "ADCS gyro bias drift causing attitude degradation",
+      "summary": "Drift in ADCS gyro bias increased attitude error and reduced star\u2011tracker confidence, leading to an attitude\u2011control degradation event.",
+      "causal_chain": [
+        "obs_adcs_gyro_bias_deg_per_h_2",
+        "evt_010",
+        "obs_adcs_attitude_error_deg_1",
+        "obs_adcs_star_tracker_confidence_pct_1",
+        "obs_evt_evt_010"
+      ],
+      "evidence_ids": [
+        "ev_1",
+        "ev_2",
+        "ev_3",
+        "ev_4",
+        "ev_5"
+      ],
+      "contradiction_ids": [
+        "ev_1",
+        "ev_2",
+        "ev_3"
+      ],
+      "assumptions": [
+        "Gyro bias drift is the primary driver of the observed attitude error",
+        "Star\u2011tracker confidence drops as a consequence of increased attitude error",
+        "REJECTED: contradicted by 3 evidence; 4 unsupported links"
+      ],
+      "confidence": 0.365,
       "score": 0.0
     }
   ],
   "investigation_report": null,
   "evaluation_metrics": {},
   "timestamps": {
-    "created_at": "2026-11-01T09:43:09.088968Z",
-    "started_at": "2026-11-01T09:43:09.088968Z",
-    "completed_at": "2026-11-01T09:43:09.300985Z"
+    "created_at": "2026-11-01T11:45:14.072976Z",
+    "started_at": "2026-11-01T11:45:14.072976Z",
+    "completed_at": "2026-11-01T11:45:14.314804Z"
   },
   "_demo": {
-    "recorded_from": "fake_llm",
-    "note": "fake-recorded demo; real-LLM variant to be recorded when GROQ_API_KEY is available"
+    "mode": "real",
+    "provider": "groq",
+    "models": {
+      "reasoning": "openai/gpt-oss-120b",
+      "fast": "openai/gpt-oss-20b",
+      "alt": "qwen/qwen3.8-27b"
+    },
+    "tokens_in": 19147,
+    "tokens_out": 8520,
+    "calls": 9,
+    "duration_seconds": 481.17,
+    "recorded_at": "2026-11-01T11:45:14.327725+00:00",
+    "scenario": "battery_failure",
+    "note": "real-recorded demo; fake variant under fixtures/demo/fake/"
   }
 }

@@ -103,9 +103,7 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
         rr.investigation_report = (
             f"LLM stage failed: {llm_err}; degraded result with graph and observations."
         )
-        emit(
-            "failed", "LLM stage failed; degraded", 1.0
-        )
+        emit("failed", "LLM stage failed; degraded", 1.0)
         return rr
 
     rr = RunResult(
@@ -115,7 +113,11 @@ def run_investigation(inputs, config=None, llm=None, progress=None, use_cache=Tr
         observations=observations,
         graph=graph,
         hypotheses=hyps,
-        timestamps=RunTimestamps(created_at=created, started_at=created, completed_at=completed),
+        timestamps=RunTimestamps(
+            created_at=created,
+            started_at=created,
+            completed_at=completed,
+        ),
     )
     emit("completed", "Complete", 1.0)
     return rr
@@ -127,7 +129,15 @@ def run_scenario(scenario_id, config=None, llm=None, progress=None, use_cache=Tr
 
 
 def replay_demo(scenario_id: str):
-    """Replay a recorded demo run without the LLM (offline-safe)."""
+    """Replay a recorded demo run without the LLM (offline-safe).
+
+    Returns ``(RunResult, progress_events, demo_meta)``. The recorded file may
+    carry a ``_demo`` metadata marker (mode, model, tokens, date) which is
+    stripped before schema validation; the mode is exposed in
+    ``result.investigation_report`` and returned in ``demo_meta`` so the UI can
+    surface how the demo was recorded.
+    """
+
     from autopsy.schemas.results import RunResult
 
     demo_dir = Path("fixtures/demo") / scenario_id
@@ -136,13 +146,16 @@ def replay_demo(scenario_id: str):
     if not run_path.exists():
         raise FileNotFoundError(f"No recorded demo run for scenario {scenario_id!r} at {run_path}")
     data = json.loads(run_path.read_text())
-    # strip the demo metadata marker before validation
-    data.pop("_demo", None)
+    meta = data.pop("_demo", {}) or {}
+    mode = meta.get("mode", "unknown")
     result = RunResult.model_validate(data)
+    banner = f"[replay-demo: recorded {'real' if mode == 'real' else 'fake'} run]"
+    result.investigation_report = (result.investigation_report or "") + f"\n{banner}"
     events = []
     if events_path.exists():
         events = json.loads(events_path.read_text())
-    return result, events
+    demo_meta = {"mode": mode, "banner": banner, **meta}
+    return result, events, demo_meta
 
 
 def main():
@@ -159,14 +172,40 @@ def main():
         parser.print_help()
         sys.exit(1)
     from autopsy.llm.config import LLMConfig
+
+    config = LLMConfig.from_env()
+    if args.fake_llm:
+        # dataclass is frozen; rebuild with fake forced on
+        config = LLMConfig(
+            api_key=None,
+            fake=True,
+            cache_dir=config.cache_dir,
+            requests_per_minute=config.requests_per_minute,
+            tokens_per_minute=config.tokens_per_minute,
+            tokens_per_day=config.tokens_per_day,
+        )
+    elif not config.api_key:
+        print(
+            "ERROR: real LLM requested but no GROQ_API_KEY "
+            "(or MISSION_AUTOPSY_LLM_API_KEY) is set. "
+            "Set the key or pass --fake-llm to run offline.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    mode = "fake" if config.fake else "real"
+    print(f"LLM mode: {mode} (key={'set' if config.api_key else 'none'})")
+    llm = LLMClient(config)
     try:
         if args.replay_demo:
-            rr, events = replay_demo(args.scenario_id)
-            print(f"Replaying demo for {args.scenario_id} ({len(events)} progress events)")
+            rr, events, demo_meta = replay_demo(args.scenario_id)
+            print(demo_meta["banner"])
+            print(
+                f"Replaying demo for {args.scenario_id} "
+                f"({len(events)} progress events, mode={demo_meta['mode']})"
+            )
             for ev in events:
                 print(f"  [{ev['fraction']:.0f}%] {ev['stage']}: {ev['message']}")
         else:
-            llm = LLMClient(LLMConfig(fake=args.fake_llm))
             rr = run_scenario(args.scenario_id, llm=llm, use_cache=not args.no_cache)
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)

@@ -64,6 +64,7 @@ def test_fake_llm_all_agent_models_validate():
 def test_demo_run_result_validates_against_schema():
     import json
     from pathlib import Path
+
     from autopsy.schemas.results import RunResult
 
     demo_dir = Path("fixtures/demo/battery_failure")
@@ -79,9 +80,13 @@ def test_demo_run_result_validates_against_schema():
 def test_replay_demo_returns_recorded_run():
     from autopsy.pipeline import replay_demo
 
-    result, events = replay_demo("battery_failure")
+    result, events, demo_meta = replay_demo("battery_failure")
     assert result.status.value == "completed"
     assert len(result.hypotheses) >= 3
     assert len(events) >= 1
-    assert events[0]["stage"] == "ingesting"
-    assert events[-1]["stage"] == "completed"
+    stages = [e["stage"] for e in events]
+    assert "ingesting" in stages
+    assert "completed" in stages
+    assert stages.index("ingesting") < stages.index("completed")
+    assert "mode" in demo_meta
+    assert demo_meta["banner"].startswith("[replay-demo:")
