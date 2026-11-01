@@ -18,21 +18,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from autopsy.ingest.loaders import (
+    load_investigation_inputs,
+    load_scenario_spec,
+    load_subsystem_specs,
+)
 from autopsy.pipeline import run_scenario
+from autopsy.schemas.scenarios import ScenarioSpec
 from backend.db import investigations as inv_repo
 from backend.db import runs as run_repo
 from backend.db.database import connect
 from backend.db.investigations import InvestigationRecord, update_investigation_status
 from backend.db.runs import RunRecord
 from backend.exceptions import BadRequestError, NotFoundError
-from backend.scenarios import (
-    SUBSYSTEMS,
-    ScenarioDefinition,
-    SubsystemDefinition,
-    get_scenario,
-    list_scenarios,
-    list_subsystems,
-)
 from backend.schemas.catalog import (
     FaultConfig,
     FaultOptionResponse,
@@ -67,6 +65,105 @@ _STAGES = (
     ("scoring", 80, "Ranking hypotheses against the evidence."),
     ("completed", 100, "Investigation complete."),
 )
+
+
+def _scenario_dir() -> Path:
+    return Path("configs/scenarios")
+
+
+def _load_all_scenario_specs() -> dict[str, ScenarioSpec]:
+    """Load every scenario declaration from ``configs/scenarios/*.yaml``.
+
+    Scenarios are keyed by file stem so that ``POST /investigations`` and
+    ``python -m autopsy run`` use the same identifier for a scenario.
+    """
+    specs: dict[str, ScenarioSpec] = {}
+    for path in sorted(_scenario_dir().glob("*.yaml")):
+        spec = load_scenario_spec(path)
+        specs[path.stem] = spec
+    return specs
+
+
+def _get_scenario_spec(scenario_id: str) -> ScenarioSpec:
+    specs = _load_all_scenario_specs()
+    spec = specs.get(scenario_id.strip())
+    if spec is None:
+        raise NotFoundError("Scenario", scenario_id)
+    return spec
+
+
+def _subsystem_responses(spec: ScenarioSpec) -> list[SubsystemResponse]:
+    specs = load_subsystem_specs("configs/subsystems")
+    items: list[SubsystemResponse] = []
+    for subsystem_id in spec.subsystems:
+        sub = specs.get(subsystem_id)
+        if sub is None:
+            continue
+        items.append(
+            SubsystemResponse(
+                id=sub.id,
+                name=sub.name,
+                description=sub.description,
+                depends_on=list(sub.dependencies),
+            )
+        )
+    return items
+
+
+def _fault_option_response(spec: ScenarioSpec) -> FaultOptionResponse:
+    return FaultOptionResponse(
+        fault_type=spec.fault.fault_type,
+        description=(
+            f"{spec.fault.fault_type.value} on {spec.fault.target_subsystem}"
+        ),
+        target_subsystems=[spec.fault.target_subsystem],
+        min_duration_seconds=60.0,
+        max_duration_seconds=float(spec.duration_seconds),
+        min_magnitude=0.0,
+        max_magnitude=float(spec.fault.magnitude),
+    )
+
+
+def _spec_to_response(stem: str, spec: ScenarioSpec) -> ScenarioResponse:
+    return ScenarioResponse(
+        id=stem,
+        name=spec.name,
+        description=spec.description,
+        duration_seconds=spec.duration_seconds,
+        subsystem_ids=list(spec.subsystems),
+        fault_types=[spec.fault.fault_type],
+    )
+
+
+def _spec_to_detail(stem: str, spec: ScenarioSpec) -> ScenarioDetailResponse:
+    base = _spec_to_response(stem, spec).model_dump()
+    subsystem_specs = load_subsystem_specs("configs/subsystems")
+    return ScenarioDetailResponse(
+        **base,
+        mission_start_utc=spec.mission_start_utc,
+        subsystems=_subsystem_responses(spec),
+        telemetry_parameters=[
+            TelemetryParameterResponse(
+                parameter=parameter.name,
+                subsystem=subsystem_id,
+                unit=parameter.unit,
+                nominal_value=(
+                    (parameter.nominal_min + parameter.nominal_max) / 2.0
+                    if parameter.nominal_min is not None
+                    and parameter.nominal_max is not None
+                    else 0.0
+                ),
+                description=parameter.description,
+            )
+            for subsystem_id in spec.subsystems
+            for parameter in (
+                subsystem_specs.get(subsystem_id).monitored_parameters
+                if subsystem_specs.get(subsystem_id) is not None
+                else []
+            )
+        ],
+        fault_options=[_fault_option_response(spec)],
+    )
 
 
 def _record_to_response(record: InvestigationRecord) -> InvestigationResponse:
@@ -212,17 +309,20 @@ class AutopsyInvestigationService:
             raise BadRequestError("scenario_id must not be blank.")
         # The autopsy pipeline reads scenarios from configs/scenarios; validate
         # against those so the API scenario ids match the CLI (`autopsy run <id>`).
-        self._require_autopsy_scenario(scenario_id)
+        _get_scenario_spec(scenario_id)
 
         now = to_iso_z(utc_now())
         identifier = f"inv_{uuid.uuid4().hex}"
+        fault_type = payload.fault_type
+        if fault_type is None and payload.fault_config is not None:
+            fault_type = payload.fault_config.fault_type.value
         record = InvestigationRecord(
             id=identifier,
             scenario_id=scenario_id,
             title=payload.title or f"Investigation of {scenario_id}",
             description=payload.description
             or "Investigation executed by the autopsy pipeline.",
-            fault_type=(payload.fault_type or "unknown"),
+            fault_type=fault_type or "unknown",
             status=InvestigationStatus.RUNNING.value,
             progress=0,
             current_stage="ingesting",
@@ -364,56 +464,67 @@ class AutopsyInvestigationService:
 
     # ------------------------------------------------------------------- catalog
     def scenarios(self) -> ScenarioListResponse:
+        specs = _load_all_scenario_specs()
         return ScenarioListResponse(
-            items=[_scenario_summary(scenario) for scenario in list_scenarios()]
+            items=[_spec_to_response(stem, spec) for stem, spec in specs.items()]
         )
 
     def get_scenario(self, scenario_id: str) -> ScenarioDetailResponse:
-        return _scenario_detail(self._require_scenario(scenario_id))
+        spec = _get_scenario_spec(scenario_id)
+        return _spec_to_detail(scenario_id, spec)
 
     def inject_fault(
         self, scenario_id: str, fault_config: FaultConfig
     ) -> ScenarioInjectionResponse:
-        scenario = self._require_scenario(scenario_id)
-        validated = self._validate_fault(scenario, fault_config)
+        spec = _get_scenario_spec(scenario_id)
+        if fault_config.fault_type != spec.fault.fault_type:
+            raise BadRequestError(
+                f"Fault type '{fault_config.fault_type.value}' is not supported "
+                f"by scenario '{scenario_id}'.",
+                code="invalid_fault_type",
+            )
+        if fault_config.target_subsystem != spec.fault.target_subsystem:
+            raise BadRequestError(
+                f"Fault target '{fault_config.target_subsystem}' is not valid for "
+                f"scenario '{scenario_id}'; expected '{spec.fault.target_subsystem}'.",
+                code="invalid_fault_target",
+            )
         return ScenarioInjectionResponse(
             injection_id=f"inj_{uuid.uuid4().hex}",
-            scenario_id=scenario.id,
-            fault_config=validated,
-            effective_start_time=validated.start_time,
-            effective_end_time=validated.start_time + timedelta(seconds=validated.duration_seconds),
-            scenario=_scenario_detail(scenario),
+            scenario_id=scenario_id,
+            fault_config=fault_config,
+            effective_start_time=fault_config.start_time,
+            effective_end_time=fault_config.start_time
+            + timedelta(seconds=fault_config.duration_seconds),
+            scenario=_spec_to_detail(scenario_id, spec),
             preview=True,
             applied=False,
         )
 
     def subsystems(self) -> SubsystemListResponse:
+        specs = load_subsystem_specs("configs/subsystems")
         return SubsystemListResponse(
-            items=[_subsystem_response(subsystem) for subsystem in list_subsystems()]
+            items=[
+                SubsystemResponse(
+                    id=sub.id,
+                    name=sub.name,
+                    description=sub.description,
+                    depends_on=list(sub.dependencies),
+                )
+                for sub in specs.values()
+            ]
         )
 
     # -------------------------------------------------------------------- runs
     def create_run(self, payload: RunCreate) -> RunResponse:
         scenario_id = payload.scenario_id.strip()
         # The autopsy pipeline reads scenarios from configs/scenarios; validate
-        # against those so the API scenario ids match the CLI.
-        self._require_autopsy_scenario(scenario_id)
-        # Catalog scenario (for fault metadata) may not exist for autopsy-only
-        # scenarios; fall back to a sensible default fault configuration.
-        scenario = get_scenario(scenario_id)
+        # against those so the API scenario ids match the CLI (`autopsy run <id>`).
+        spec = _get_scenario_spec(scenario_id)
         requested = payload.resolved_investigation_config
-        if scenario is not None:
-            fault_config = self._validate_fault(
-                scenario, requested.fault_config or self._default_fault(scenario)
-            )
-        else:
-            fault_config = requested.fault_config or FaultConfig(
-                fault_type=FaultType.POWER_DEGRADATION,
-                target_subsystem="eps",
-                start_time=utc_now(),
-                duration_seconds=120.0,
-                magnitude=25.0,
-            )
+        fault_config = self._validate_fault(
+            spec, requested.fault_config or self._default_fault(spec)
+        )
         config = InvestigationConfig(
             fault_config=fault_config,
             agent_config=requested.agent_config,
@@ -423,10 +534,10 @@ class AutopsyInvestigationService:
         now = utc_now()
         timestamp = to_iso_z(now)
         run_id = f"run_{uuid.uuid4().hex}"
-        title = payload.title or f"{scenario.name} investigation"
+        title = payload.title or f"{spec.name} investigation"
         record = RunRecord(
             run_id=run_id,
-            scenario_id=scenario.id,
+            scenario_id=scenario_id,
             status=RunStatus.QUEUED.value,
             title=title,
             config_json=config.model_dump_json(),
@@ -443,7 +554,7 @@ class AutopsyInvestigationService:
         queue_position = self._job_queue.enqueue(run_id)
         return RunResponse(
             run_id=run_id,
-            scenario_id=scenario.id,
+            scenario_id=scenario_id,
             status=RunStatus.QUEUED,
             title=title,
             investigation_config=config,
@@ -550,63 +661,49 @@ class AutopsyInvestigationService:
                 )
 
     # ------------------------------------------------------------ fault helpers
-    def _default_fault(self, scenario: ScenarioDefinition) -> FaultConfig:
-        option = scenario.fault_options[0]
-        offset = min(30.0, scenario.duration_seconds / 10)
-        duration = min(120.0, option.max_duration_seconds, scenario.duration_seconds - offset)
+    def _default_fault(self, spec: ScenarioSpec) -> FaultConfig:
+        offset = min(30.0, spec.duration_seconds / 10)
+        duration = min(120.0, spec.duration_seconds - offset)
         return FaultConfig(
-            fault_type=option.fault_type,
-            target_subsystem=option.target_subsystems[0],
-            start_time=scenario.mission_start_utc + timedelta(seconds=offset),
+            fault_type=spec.fault.fault_type,
+            target_subsystem=spec.fault.target_subsystem,
+            start_time=spec.mission_start_utc + timedelta(seconds=offset),
             duration_seconds=duration,
-            magnitude=max(option.min_magnitude, min(25.0, option.max_magnitude)),
+            magnitude=max(0.0, min(25.0, spec.fault.magnitude)),
         )
 
     def _validate_fault(
-        self, scenario: ScenarioDefinition, fault_config: FaultConfig
+        self, spec: ScenarioSpec, fault_config: FaultConfig
     ) -> FaultConfig:
-        option = next(
-            (
-                candidate
-                for candidate in scenario.fault_options
-                if candidate.fault_type == fault_config.fault_type
-            ),
-            None,
-        )
-        if option is None:
+        if fault_config.fault_type != spec.fault.fault_type:
             raise BadRequestError(
                 f"Fault type '{fault_config.fault_type.value}' is not supported "
-                f"by scenario '{scenario.id}'.",
+                f"by scenario '{spec.id}'.",
                 code="invalid_fault_type",
             )
-        if fault_config.target_subsystem not in option.target_subsystems:
-            targets = ", ".join(option.target_subsystems)
+        if fault_config.target_subsystem != spec.fault.target_subsystem:
             raise BadRequestError(
                 f"Fault target '{fault_config.target_subsystem}' is not valid for "
-                f"scenario '{scenario.id}'; expected one of: {targets}.",
+                f"scenario '{spec.id}'; expected '{spec.fault.target_subsystem}'.",
                 code="invalid_fault_target",
             )
         if not (
-            option.min_duration_seconds
-            <= fault_config.duration_seconds
-            <= option.max_duration_seconds
+            0.0 < fault_config.duration_seconds <= spec.duration_seconds
         ):
             raise BadRequestError(
-                "duration_seconds must be between "
-                f"{option.min_duration_seconds} and {option.max_duration_seconds} "
-                f"for fault type '{fault_config.fault_type.value}'.",
+                "duration_seconds must be greater than 0 and no more than "
+                f"{spec.duration_seconds} for scenario '{spec.id}'.",
                 code="invalid_fault_duration",
             )
-        if not (option.min_magnitude <= fault_config.magnitude <= option.max_magnitude):
+        if not (0.0 <= fault_config.magnitude <= spec.fault.magnitude):
             raise BadRequestError(
-                "magnitude must be between "
-                f"{option.min_magnitude} and {option.max_magnitude} "
-                f"for fault type '{fault_config.fault_type.value}'.",
+                "magnitude must be between 0 and "
+                f"{spec.fault.magnitude} for scenario '{spec.id}'.",
                 code="invalid_fault_magnitude",
             )
 
-        mission_start = scenario.mission_start_utc
-        mission_end = mission_start + timedelta(seconds=scenario.duration_seconds)
+        mission_start = spec.mission_start_utc
+        mission_end = mission_start + timedelta(seconds=spec.duration_seconds)
         fault_end = fault_config.start_time + timedelta(seconds=fault_config.duration_seconds)
         if fault_config.start_time < mission_start or fault_end > mission_end:
             raise BadRequestError(
@@ -614,20 +711,6 @@ class AutopsyInvestigationService:
                 code="fault_outside_scenario",
             )
         return fault_config
-
-    def _require_scenario(self, scenario_id: str) -> ScenarioDefinition:
-        scenario = get_scenario(scenario_id.strip())
-        if scenario is None:
-            raise NotFoundError("Scenario", scenario_id)
-        return scenario
-
-    def _require_autopsy_scenario(self, scenario_id: str) -> None:
-        """Validate that the scenario exists for the autopsy pipeline
-        (configs/scenarios/<id>.yaml), so API scenario ids match the CLI."""
-        from pathlib import Path
-
-        if not Path(f"configs/scenarios/{scenario_id}.yaml").exists():
-            raise NotFoundError("Scenario", scenario_id)
 
     def _require(self, investigation_id: str) -> InvestigationRecord:
         record = inv_repo.get_investigation(self._database_path, investigation_id)
