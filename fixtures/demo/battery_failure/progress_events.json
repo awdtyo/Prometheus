@@ -1,0 +1,32 @@
+[
+  {
+    "stage": "ingesting",
+    "message": "Ingesting inputs",
+    "fraction": 0.05,
+    "timestamp": "2026-11-01T09:43:09.088993+00:00"
+  },
+  {
+    "stage": "graphing",
+    "message": "Building graph",
+    "fraction": 0.2,
+    "timestamp": "2026-11-01T09:43:09.093578+00:00"
+  },
+  {
+    "stage": "analyzing",
+    "message": "Running agents",
+    "fraction": 0.4,
+    "timestamp": "2026-11-01T09:43:09.299333+00:00"
+  },
+  {
+    "stage": "scoring",
+    "message": "Scoring",
+    "fraction": 0.8,
+    "timestamp": "2026-11-01T09:43:09.300589+00:00"
+  },
+  {
+    "stage": "completed",
+    "message": "Complete",
+    "fraction": 1.0,
+    "timestamp": "2026-11-01T09:43:09.301093+00:00"
+  }
+]
