@@ -1,0 +1,77 @@
+id: adcs
+name: Attitude Determination and Control System
+description: >
+  Determines spacecraft attitude and controls it with reaction wheels and
+  thrusters. Pointing accuracy is required for communications antenna gain and
+  payload operations.
+
+monitored_parameters:
+  - name: attitude_error_deg
+    unit: deg
+    nominal_min: 0.0
+    nominal_max: 0.5
+    warning_low: null
+    warning_high: 1.0
+    critical_low: null
+    critical_high: 2.0
+    description: Estimated attitude control error.
+
+  - name: reaction_wheel_speed_rpm
+    unit: rpm
+    nominal_min: 0.0
+    nominal_max: 4200.0
+    warning_low: null
+    warning_high: 4800.0
+    critical_low: null
+    critical_high: 5200.0
+    description: Peak reaction wheel speed.
+
+  - name: reaction_wheel_current_a
+    unit: A
+    nominal_min: 0.2
+    nominal_max: 1.6
+    warning_low: 0.1
+    warning_high: 2.1
+    critical_low: 0.0
+    critical_high: 2.6
+    description: Reaction wheel bus current.
+
+  - name: star_tracker_confidence_pct
+    unit: "%"
+    nominal_min: 90.0
+    nominal_max: 100.0
+    warning_low: 80.0
+    warning_high: null
+    critical_low: 60.0
+    critical_high: null
+    description: Star tracker solution confidence.
+
+  - name: gyro_bias_deg_per_h
+    unit: deg/h
+    nominal_min: -0.02
+    nominal_max: 0.02
+    warning_low: -0.05
+    warning_high: 0.05
+    critical_low: -0.1
+    critical_high: 0.1
+    description: Estimated gyro bias.
+
+dependencies:
+  - eps
+  - obc
+
+relevant_events:
+  - event_type: attitude_control_degraded
+    description: Attitude error exceeds the nominal pointing limit.
+    severity: high
+  - event_type: reaction_wheel_saturation
+    description: Reaction wheel speed approaches saturation.
+    severity: high
+  - event_type: star_tracker_degraded
+    description: Star tracker confidence falls below the warning threshold.
+    severity: medium
+
+expected_downstream_effects:
+  - Attitude error grows as wheel torque authority and power are reduced.
+  - Pointing loss reduces communications antenna gain.
+  - Star tracker confidence may fall when thermal conditions drift.

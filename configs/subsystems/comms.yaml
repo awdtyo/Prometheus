@@ -1,0 +1,81 @@
+id: comms
+name: Communication System
+description: >
+  Provides telemetry, command, and payload downlink through the high-gain
+  antenna. Link margin depends on transmitter power, antenna pointing, and
+  thermal conditions.
+
+monitored_parameters:
+  - name: transmitter_power_w
+    unit: W
+    nominal_min: 8.0
+    nominal_max: 12.0
+    warning_low: 7.0
+    warning_high: 13.0
+    critical_low: 5.0
+    critical_high: 14.0
+    description: RF transmitter output power.
+
+  - name: signal_to_noise_db
+    unit: dB
+    nominal_min: 18.0
+    nominal_max: 30.0
+    warning_low: 15.0
+    warning_high: 32.0
+    critical_low: 10.0
+    critical_high: 34.0
+    description: Downlink signal-to-noise ratio at the ground station.
+
+  - name: downlink_rate_kbps
+    unit: kbps
+    nominal_min: 128.0
+    nominal_max: 256.0
+    warning_low: 96.0
+    warning_high: 280.0
+    critical_low: 64.0
+    critical_high: 300.0
+    description: Negotiated downlink rate.
+
+  - name: bit_error_rate
+    unit: ratio
+    nominal_min: 0.0
+    nominal_max: 0.000001
+    warning_low: null
+    warning_high: 0.00001
+    critical_low: null
+    critical_high: 0.0001
+    description: Raw downlink bit error rate.
+
+  - name: antenna_temperature_c
+    unit: degC
+    nominal_min: -10.0
+    nominal_max: 35.0
+    warning_low: -20.0
+    warning_high: 45.0
+    critical_low: -30.0
+    critical_high: 55.0
+    description: High-gain antenna electronics temperature.
+
+dependencies:
+  - eps
+  - obc
+  - adcs
+
+relevant_events:
+  - event_type: downlink_started
+    description: Scheduled high-gain antenna downlink begins.
+    severity: info
+  - event_type: transmitter_power_reduced
+    description: Transmitter output is reduced to preserve power.
+    severity: high
+  - event_type: downlink_degraded
+    description: Downlink rate or SNR falls below the warning threshold.
+    severity: high
+  - event_type: comms_loss_risk
+    description: Link margin is insufficient for reliable commanding.
+    severity: critical
+
+expected_downstream_effects:
+  - Reduced transmitter power lowers SNR and downlink rate.
+  - Pointing loss from ADCS reduces antenna gain and link margin.
+  - Commanding may become intermittent or unavailable in safe mode.

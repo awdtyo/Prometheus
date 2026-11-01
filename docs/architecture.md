@@ -183,12 +183,18 @@ adapter is implemented.
 
 - Runtime secrets and deployment settings live in `.env` (ignored by git).
   `.env.example` contains placeholders only.
-- The mock backend's subsystem and scenario fixtures live in
-  `backend/scenarios/catalog.py` as immutable Python data. `configs/subsystems/`
-  and `configs/scenarios/` remain the planned YAML home for the real domain
-  loaders and are still empty.
+- Subsystem and scenario definitions live in `configs/subsystems/` and
+  `configs/scenarios/` as YAML. The battery-failure demo provides five subsystem
+  specs and one scenario, validated by `SubsystemSpec` and `ScenarioSpec`. The
+  mock backend also keeps immutable fixtures in `backend/scenarios/catalog.py`.
 - Sample telemetry and event logs live in `fixtures/telemetry/` and
-  `fixtures/events/`. They must be synthetic or cleared for public use.
+  `fixtures/events/`. They are synthetic and must remain synthetic or cleared
+  for public use.
+- Evaluation-only ground truth lives in `fixtures/expected/`. It is loaded only
+  by `autopsy.ingest.load_ground_truth` and must never be included in
+  `InvestigationInputs` or a hypothesis-agent prompt.
+- Scenario input paths are restricted to relative, non-`expected` paths by the
+  `InputPath` contract.
 - The frontend reads the repository-root `.env` through Vite's `envDir`; only
   `VITE_*` variables reach the browser.
 
@@ -207,7 +213,8 @@ API tests use a temporary SQLite database via the `client` fixture in
 
 ## 9. Non-goals for this backend milestone
 
-- No telemetry parsing, simulation, graph construction, agent calls, or ranking.
+- No scenario simulation, graph construction, agent calls, or ranking.
+  Telemetry, event, and YAML ingestion exists and is tested.
 - No real investigation execution; the mock service is deterministic.
 - No authentication, authorization, durable worker, or external job queue. A
   process-local FIFO queue only records pending mock run IDs.
@@ -218,6 +225,8 @@ API tests use a temporary SQLite database via the `client` fixture in
 ## 10. Evolution notes
 
 - Treat `docs/data-contracts.md` and `autopsy/schemas/` as the frozen contract.
+- Keep ground truth on the evaluation side of the boundary. Only
+  `InvestigationInputs` is agent-facing.
 - Add `autopsy` tests alongside each new module; keep the architecture guard
   green.
 - Replace the mock service in `backend/services/factory.py` with an `autopsy`

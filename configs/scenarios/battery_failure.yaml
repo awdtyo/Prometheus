@@ -1,0 +1,37 @@
+id: battery-failure
+name: Battery Voltage Failure
+description: >
+  Synthetic demonstration scenario. A gradual degradation of battery cell 3
+  raises internal resistance and reduces terminal voltage under load. The
+  resulting power shortfall propagates through thermal control, attitude
+  control, communications, and the onboard computer, ending in safe mode and a
+  declared mission-level failure. This is not real spacecraft telemetry.
+
+seed: 20260314
+mission_start_utc: "2026-03-14T08:00:00Z"
+duration_seconds: 3600.0
+sampling_interval_seconds: 60.0
+
+subsystems:
+  - eps
+  - tcs
+  - adcs
+  - comms
+  - obc
+
+fault:
+  fault_type: power_degradation
+  target_subsystem: eps
+  start_met_seconds: 900.0
+  duration_seconds: 2100.0
+  magnitude: 0.22
+  parameters:
+    battery_cell: 3
+    internal_resistance_increase_ohm: 0.035
+    initial_voltage_v: 28.6
+    degraded_voltage_v: 24.7
+    state_of_charge_at_fault_pct: 86.2
+
+telemetry_file: fixtures/telemetry/battery_failure_telemetry.csv
+event_log_json: fixtures/events/battery_failure_events.json
+event_log_csv: fixtures/events/battery_failure_events.csv

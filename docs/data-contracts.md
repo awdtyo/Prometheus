@@ -3,8 +3,9 @@
 > **Status: implemented — contract version `1.0.0`.**
 > The source of truth is `autopsy/schemas/`. This document describes the models,
 > their invariants, and their JSON representation. `backend/schemas/` remains a
-> separate HTTP DTO layer. The simulator, graph algorithms, and AI agents are not
-> implemented yet.
+> separate HTTP DTO layer. The synthetic demo configuration and fixtures are
+> implemented and validated by `autopsy/ingest/`; the simulator, graph
+> algorithms, and AI agents are not implemented yet.
 
 ## 1. Purpose and scope
 
@@ -19,11 +20,15 @@ The package exports a single public surface:
 from autopsy.schemas import (
     Evidence,
     Graph,
+    GroundTruth,
     Hypothesis,
     InvestigationConfig,
+    InvestigationInputs,
     MissionEvent,
     Observation,
     RunResult,
+    ScenarioSpec,
+    SubsystemSpec,
     TelemetryRecord,
 )
 ```
@@ -724,7 +729,218 @@ Complete input configuration for one investigation run.
 }
 ```
 
-## 8. Change process
+## 8. Configuration, fixture, and evaluation contracts
+
+The synthetic demo adds four contracts around the original investigation
+models:
+
+| Contract | Side of the boundary | Purpose |
+| --- | --- | --- |
+| `SubsystemSpec` | Configuration input | Declarative subsystem parameters, thresholds, dependencies, and events. |
+| `ScenarioSpec` | Configuration input | Deterministic scenario, fault injection in MET, and fixture paths. |
+| `InvestigationInputs` | Agent-facing input | Sanitized aggregate with telemetry, events, and subsystem specs only. |
+| `GroundTruth` | Evaluation only | Injected fault and expected causal sequence; never passed to agents. |
+
+### 8.1 `ParameterSpec`, `EventSpec`, and `SubsystemSpec`
+
+`ParameterSpec` describes one monitored telemetry parameter and its operating
+thresholds.
+
+| Field | Type | Required | Constraints / meaning |
+| --- | --- | --- | --- |
+| `name` | `ParameterName` | yes | Parameter name as used in telemetry. |
+| `unit` | `Unit` | yes | Explicit unit, for example `V`, `degC`, or `%`. |
+| `nominal_min` | `float` | yes | Lower bound of the nominal range. |
+| `nominal_max` | `float` | yes | Upper bound of the nominal range. |
+| `warning_low` | `float \| None` | no | Low warning threshold; must be below `nominal_min`. |
+| `warning_high` | `float \| None` | no | High warning threshold; must be above `nominal_max`. |
+| `critical_low` | `float \| None` | no | Low critical threshold; requires `warning_low` and must be below it. |
+| `critical_high` | `float \| None` | no | High critical threshold; requires `warning_high` and must be above it. |
+| `description` | `Description` | yes | What the parameter measures. |
+
+The validated order is:
+
+```text
+critical_low < warning_low < nominal_min <= nominal_max < warning_high < critical_high
+```
+
+A parameter may define only low thresholds, only high thresholds, or both. A
+fixed-value counter may use `nominal_min == nominal_max`.
+
+`EventSpec` declares one event type a subsystem may emit.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `event_type` | `TypeName` | yes | Lowercase snake_case event type. |
+| `description` | `Description` | yes | What the event means. |
+| `severity` | `Severity` | yes | Expected severity. |
+
+`SubsystemSpec` is one subsystem YAML file.
+
+| Field | Type | Required | Constraints / meaning |
+| --- | --- | --- | --- |
+| `id` | `SubsystemId` | yes | Stable lowercase kebab-case ID. |
+| `name` | `Label` | yes | Human-readable name. |
+| `description` | `Description` | yes | Subsystem responsibility. |
+| `monitored_parameters` | `list[ParameterSpec]` | yes | At least one; names must be unique. |
+| `dependencies` | `list[SubsystemId]` | no | Unique subsystem IDs; defaults to `[]`. |
+| `relevant_events` | `list[EventSpec]` | yes | At least one; event types must be unique. |
+| `expected_downstream_effects` | `list[Description]` | yes | At least one effect description. |
+
+A subsystem cannot depend on itself. The loader additionally rejects unknown
+dependencies, duplicate subsystem IDs across files, and dependency cycles.
+
+### 8.2 `ScenarioFaultSpec` and `ScenarioSpec`
+
+`ScenarioFaultSpec` expresses a fault in mission elapsed time (MET) so the
+scenario file is independent of the mission epoch.
+
+| Field | Type | Required | Constraints / meaning |
+| --- | --- | --- | --- |
+| `fault_type` | `FaultType` | yes | Fault family to inject. |
+| `target_subsystem` | `SubsystemId` | yes | Subsystem receiving the fault. |
+| `start_met_seconds` | `float` | yes | `>= 0`; seconds since `mission_start_utc`. |
+| `duration_seconds` | `float` | yes | `> 0`. |
+| `magnitude` | `float` | yes | `>= 0`; units depend on `fault_type`. |
+| `parameters` | `JsonObject` | no | JSON-serializable fault details; defaults to `{}`. |
+
+`ScenarioFaultSpec.to_fault_config(mission_start_utc)` converts MET to the
+absolute-UTC `FaultConfig` used by the simulator and ground truth:
+
+```text
+start_time = mission_start_utc + timedelta(seconds=start_met_seconds)
+```
+
+`ScenarioSpec` is one scenario YAML file.
+
+| Field | Type | Required | Constraints / meaning |
+| --- | --- | --- | --- |
+| `id` | `EntityId` | yes | Stable scenario ID. |
+| `name` | `Label` | yes | Human-readable name. |
+| `description` | `Description` | yes | Scenario purpose and assumptions. |
+| `seed` | `int` | yes | Deterministic generation seed. |
+| `mission_start_utc` | `UtcDatetime` | yes | Mission epoch in UTC. |
+| `duration_seconds` | `float` | yes | `> 0`. |
+| `sampling_interval_seconds` | `float` | yes | `> 0`; cannot exceed the duration. |
+| `subsystems` | `list[SubsystemId]` | yes | At least one; unique. |
+| `fault` | `ScenarioFaultSpec` | yes | Fault injection setup. |
+| `telemetry_file` | `InputPath` | yes | Relative telemetry CSV path. |
+| `event_log_json` | `InputPath` | yes | Relative JSON event-log path. |
+| `event_log_csv` | `InputPath` | yes | Relative CSV event-log path. |
+
+Scenario invariants:
+
+- `fault.target_subsystem` must appear in `subsystems`.
+- The fault must end within `duration_seconds`.
+- The duration must be an integer multiple of the sampling interval.
+
+`InputPath` keeps configuration from reaching evaluation data. It rejects
+absolute paths, `..` segments, `~` prefixes, empty paths, and any path
+containing an `expected` segment. A scenario therefore cannot point at
+`fixtures/expected/`.
+
+### 8.3 `InvestigationInputs` — the agent-facing boundary
+
+`InvestigationInputs` is the only aggregate that should be handed to analysis
+and hypothesis-generation stages.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `scenario_id` | `EntityId` | yes | Scenario identity. |
+| `scenario_name` | `Label` | yes | Human-readable scenario name. |
+| `mission_start_utc` | `UtcDatetime` | yes | Mission epoch. |
+| `duration_seconds` | `float` | yes | `> 0`. |
+| `sampling_interval_seconds` | `float` | yes | `> 0`. |
+| `subsystems` | `list[SubsystemSpec]` | yes | At least one; IDs unique. |
+| `telemetry` | `list[TelemetryRecord]` | yes | At least one; ordered by timestamp. |
+| `events` | `list[MissionEvent]` | yes | At least one; ordered by timestamp. |
+
+The model deliberately has **no** `fault`, `ground_truth`, or
+`expected_causal_sequence` field. Its validator also enforces:
+
+- Telemetry and event subsystem references must be in `subsystems`.
+- Telemetry and event timestamps must fall inside
+  `[mission_start_utc, mission_start_utc + duration_seconds]`.
+- Telemetry and events must be ordered by timestamp.
+
+`load_investigation_inputs()` adds file-level checks on top of the model: every
+telemetry parameter and unit must match a declared `ParameterSpec`, and every
+event type must be declared in the emitting subsystem's `relevant_events`. It
+never reads `fixtures/expected/`.
+
+### 8.4 `GroundTruth` — evaluation only
+
+`GroundTruthStep` is one expected step in the true causal sequence.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `step` | `int` | yes | One-based position. |
+| `timestamp` | `UtcDatetime` | yes | When the step occurs, in UTC. |
+| `subsystem` | `SubsystemId` | yes | Subsystem associated with the step. |
+| `event_type` | `TypeName` | yes | Lowercase snake_case event type. |
+| `description` | `Description` | yes | What happened and why. |
+| `evidence_ids` | `list[EntityId]` | no | Supporting event or observation IDs; defaults to `[]`. |
+
+`GroundTruth` is the evaluation record for one scenario.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `scenario_id` | `EntityId` | yes | Scenario this ground truth belongs to. |
+| `synthetic` | `Literal[True]` | yes | Marks the data as synthetic. |
+| `injected_fault` | `FaultConfig` | yes | Fault that was actually injected, in absolute UTC. |
+| `expected_causal_sequence` | `list[GroundTruthStep]` | yes | At least one step. |
+| `expected_terminal_state` | `safe_mode \| mission_failure \| recovery` | yes | Expected final state. |
+| `notes` | `Description \| None` | no | Evaluation notes. |
+
+Ground-truth invariants:
+
+- Steps are numbered `1..n` in order.
+- Step timestamps are non-decreasing.
+- The sequence includes the injected fault's target subsystem.
+
+**Boundary rule:** ground truth is evaluation data. Never include it in a
+hypothesis-agent prompt, an `InvestigationInputs` object, or any serialized
+agent input. Only `load_ground_truth()` reads
+`fixtures/expected/battery_failure_ground_truth.json`, and only the
+evaluation/scoring stage should consume the result.
+
+### 8.5 On-disk fixture formats
+
+The demo files are documented in detail in
+[`fixtures/README.md`](../fixtures/README.md). The canonical shapes are:
+
+**Telemetry CSV** — header
+`timestamp,subsystem,parameter,value,unit,source_id`. Timestamps are UTC ISO
+8601. Rows are ordered by timestamp and unique per
+`(timestamp, subsystem, parameter)`. The battery-failure fixture contains 1,403
+rows (61 timestamps × 23 parameters).
+
+**Event JSON** — a JSON array of `MissionEvent` objects. Event IDs are unique and
+events are ordered by timestamp.
+
+**Event CSV** — the same fields as `MissionEvent`; `metadata` is a compact JSON
+object encoded as a string, or empty when there is no metadata.
+
+**Ground-truth JSON** — a single `GroundTruth` object. It lives only under
+`fixtures/expected/`.
+
+### 8.6 Loaders
+
+All loaders live in `autopsy/ingest/` and raise `autopsy.ingest.IngestError`
+instead of leaking file-system, PyYAML, CSV, JSON, or Pydantic exceptions.
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `load_subsystem_spec(path)` | `SubsystemSpec` | Validates one YAML file. |
+| `load_subsystem_specs(directory)` | `dict[str, SubsystemSpec]` | Loads every `*.yaml`; validates unique IDs, dependencies, and cycles. |
+| `load_scenario_spec(path)` | `ScenarioSpec` | Validates one scenario YAML file. |
+| `load_telemetry_csv(path)` | `list[TelemetryRecord]` | Validates header, values, duplicates, and timestamp ordering. |
+| `load_events_json(path)` | `list[MissionEvent]` | Validates the array shape, IDs, and timestamp ordering. |
+| `load_events_csv(path)` | `list[MissionEvent]` | Parses the JSON `metadata` column. |
+| `load_ground_truth(path)` | `GroundTruth` | Evaluation only. |
+| `load_investigation_inputs(scenario_path, ...)` | `InvestigationInputs` | Cross-checks config, telemetry, and events; never reads `expected/`. |
+
+## 9. Change process
 
 1. Propose the shape change with a rationale and the affected models.
 2. Update the Pydantic model and its field constraints.
@@ -735,12 +951,12 @@ Complete input configuration for one investigation run.
 6. Increment `SCHEMA_VERSION` for breaking changes. Additive optional fields may
    keep the same major version until an external consumer depends on the shape.
 
-## 9. Open questions
+## 10. Open questions
 
 - Which telemetry formats must be supported first (CSV, Parquet, JSON lines)?
 - What is the canonical sampling/resampling policy when channels differ?
 - How is clock skew between sources represented and corrected?
-- What is the subsystem taxonomy and who owns it?
+- How should the five demo subsystems generalize to other mission types?
 - How do external event logs map onto `Severity` and `event_type` values?
 - How granular must evidence be for a hypothesis to be defensible?
 - Do agents return free-form rationale, structured claims, or both?
