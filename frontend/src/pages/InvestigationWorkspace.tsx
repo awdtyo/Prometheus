@@ -1,374 +1,164 @@
-/* =============================================================================
-   Investigation Workspace Page
-   -------------------------------------------------------
-   Active investigation dashboard showing the current investigation state,
-   run timestamps, observations, graph, hypotheses, and now:
-   - Telemetry chart with multiple subsystem parameters
-   - Mission event timeline
-   - Observation markers with cross-linking
-   ============================================================================= */
+import { useParams, Link } from "react-router-dom";
 
-import { useEffect, useState } from "react";
 import {
-  listInvestigations,
-  getInvestigation,
-  getTimeline,
-} from "../../api/client";
-import type {
-  InvestigationSummary,
-  InvestigationRead,
-  TimelineEvent,
-} from "../../types/api";
-import type { MockInvestigation, MockObservation } from "../../types/api";
+  useInvestigation,
+  useTimeline,
+  problemFromError,
+} from "../api/client";
+import { Loading } from "../components/Loading";
+import { Empty } from "../components/Empty";
+import { FaultInjectionForm } from "../components/FaultInjectionForm";
 
-import { useLocation, useNavigate } from "react-router-dom";
-
-import React from "react";
-import { TelemetryChart, TelemetryEmptyState, TelemetryErrorState } from "../../components/TelemetryChart";
-import { EventTimeline, EventTimelineEmpty } from "../../components/EventTimeline";
-import { ObservationMarkers } from "../../components/ObservationMarkers";
-
-/* -------------------------------------------------------
-   Types for telemetry chart props
-   ------------------------------------------------------- */
-
-interface TelemetryChartData {
-  timestamp: string; // ISO 8601 UTC
-  subsystem: SubsystemId;
-  parameter: ParameterName;
-  value: number;
-  unit: string;
-}
-
-/* -------------------------------------------------------
-
-   Investigation Workspace Page
-   ------------------------------------------------------- */
+import type { TimelineEvent } from "../types/api";
 
 export function InvestigationWorkspacePage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const investigationId = location.pathname.match(/\/workspace([^/]*)/)?.[1] || "";
+  const { id } = useParams<{ id: string }>();
+  const { data: investigation, error, isLoading } = useInvestigation(id ?? null);
+  const { data: timeline } = useTimeline(id ?? null);
 
-  const [investigation, setInvestigation] = useState<InvestigationRead | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedRange, setSelectedRange] = useState<[string, string] | null>(null);
+  const events: TimelineEvent[] = timeline?.events ?? [];
 
-  // Timeline events from API (populated by getTimeline)
-  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
-
-  // Load investigation data
-  useEffect(() => {
-    const controller = new AbortController();
-
-    // Parallel: get investigation and its timeline
-    Promise.all([
-      getInvestigation(investigationId || "inv_001", controller.signal).then((data) => setInvestigation(data)),
-      getTimeline(investigationId || "inv_001", controller.signal).then((data) => {
-        // Transform API timeline events to internal format
-        // and store for EventTimeline component
-        setTimelineEvents(data);
-      }),
-    ])
-      .then(() => {
-        // After data loads, set up telemetry chart data
-        if (investigation) {
-          setupTelemetryChartData(investigation);
-        }
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Unknown error");
-        setLoading(false);
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [investigationId]);
-
-  // -------------------------------------------------------------------------
-  // Setup telemetry chart data from investigation observations and graph
-  // -------------------------------------------------------------------------
-
-  const [telemetryData, setTelemetryData] = useState<TelemetryChartData[]>([]);
-  const [subsystems, setSubsystems] = useState<SubsystemId[]>([]);
-  const [missionStartUtc, setMissionStartUtc] = useState<string>("");
-
-  const setupTelemetryChartData = (inv: InvestigationRead) => {
-    // Build telemetry data from observations and graph
-    const data: TelemetryChartData[] = [];
-
-    // Add observations as telemetry points
-    inv.observations.forEach((obs) => {
-      data.push({
-        timestamp: obs.timestamp,
-        subsystem: obs.subsystem,
-        parameter: obs.observation_type,
-        value: obs.observed_value,
-        unit: "V", // Default unit; in production, use actual unit from config
-      });
-    });
-
-    // Add graph node timestamps as reference points
-    inv.graph.nodes.forEach((node) => {
-      if (node.timestamp) {
-        // Find observations matching this subsystem
-        const matchingObs = inv.observations?.filter(
-          (o) => o.subsystem === (node.label?.match(/^[a-z-]+/)?.[0] || "power")
-        );
-        if (matchingObs?.length > 0) {
-          matchingObs.forEach((obs) => {
-            data.push({
-              timestamp: obs.timestamp,
-              subsystem: obs.subsystem,
-              parameter: obs.observation_type,
-              value: obs.observed_value,
-              unit: "V",
-            });
-          });
-        }
-      }
-    });
-
-    setTelemetryData(data);
-
-    // Derive unique subsystems from data and scenario
-    const derivedSubsystems = [...new Set(data.map((d) => d.subsystem))];
-    setSubsystems(derivedSubsystems.length > 0 ? derivedSubsystems : ["power"]);
-    setMissionStartUtc(inv.scenario?.mission_start_utc || "2026-10-30T12:00:00Z");
-  };
-
-  // -------------------------------------------------------------------------
-  // State for cross-linking
-  // -------------------------------------------------------------------------
-
-  const [highlightedObservation, setHighlightedObservation] = useState<MockObservation | null>(null);
-  const [showObservationDetail, setShowObservationDetail] = useState(false);
-
-  // -------------------------------------------------------------------------
-  // Compute chart domain
-  // -------------------------------------------------------------------------
-
-  const allValues = telemetryData.map((d) => d.value);
-  const minValue = allValues.length > 0 ? Math.min(...allValues) * 0.9 : 20;
-  const maxValue = allValues.length > 0 ? Math.max(...allValues) * 1.1 : 30;
-
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
-
-  if (loading) {
+  if (isLoading) return <Loading />;
+  if (error) {
+    const p = problemFromError(error);
     return (
-      <section className="page investigation-workspace">
-        <div className="page__loading">
-          <p>Loading investigation...</p>
-        </div>
-      </section>
+      <div style={pageStyles.container}>
+        <h1>Investigation</h1>
+        <p>Unable to load investigation.</p>
+        <p>{p.detail}</p>
+      </div>
     );
   }
-
   if (!investigation) {
     return (
-      <section className="page investigation-workspace">
-        <div className="page__error">
-          <p>Investigation not found.</p>
-        </div>
-      </section>
+      <div style={pageStyles.container}>
+        <h1>Investigation</h1>
+        <p>No investigation selected.</p>
+      </div>
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Render main content
-  // -------------------------------------------------------------------------
+  const statusColor: Record<string, string> = {
+    pending: "var(--amber)",
+    running: "var(--amber)",
+    completed: "var(--green)",
+    failed: "var(--red)",
+    cancelled: "var(--faint)",
+  };
 
   return (
-    <section className="page investigation-workspace">
-      <div className="workspace-header">
-        <h2 className="workspace-header__title">
-          Investigation {investigation.investigation_id}
-        </h2>
-        <div className="workspace-header__status">
-          <span className="status-dot status-dot--{investigation.status}" />
-          <span className="status-text">{investigation.status}</span>
+    <div style={pageStyles.container}>
+      <nav style={pageStyles.breadcrumbs}>
+        <Link to="/">Scenarios</Link>{" "}{">"}{" "}<span>Investigation</span>
+      </nav>
+
+      <h1>Investigation Workspace</h1>
+
+      <div style={pageStyles.headerCard}>
+        <div>
+          <h2 style={pageStyles.title}>{investigation.title}</h2>
+          <p style={pageStyles.sub}>
+            Scenario: {investigation.scenario_id}{" "}\u2022{" "} Created:{" "}
+            {investigation.created_at}
+          </p>
+        </div>
+        <div style={pageStyles.statusBadge}>
+          <span
+            style={{ ...pageStyles.statusDot, background: statusColor[investigation.status] }}
+          />
+          <span style={pageStyles.statusText}>{investigation.status}</span>
+          <span style={pageStyles.progressText}>
+            {investigation.progress}% complete
+          </span>
         </div>
       </div>
 
-      <div className="workspace-grid">
+      <FaultInjectionForm scenarioId={investigation.scenario_id} />
 
-        {/* LEFT COLUMN: Main panels (reduced width for new components) */}
-        <section className="workspace-panel" style={{ width: "52%" }}>
-
-          {/* Run Timestamps */}
-          <div className="workspace-subpanel">
-            <h3 className="panel__title">Run Timestamps</h3>
-            <dl className="timeline-dl">
-              <div>
-                <dt>Created at</dt>
-                <dd>{investigation.run_timestamps.created_at}</dd>
-              </div>
-              {investigation.run_timestamps.started_at && (
-                <div>
-                  <dt>Started at</dt>
-                  <dd>{investigation.run_timestamps.started_at}</dd>
+      <div style={pageStyles.section}>
+        <h3 style={pageStyles.sectionTitle}>Timeline</h3>
+        {events.length === 0 ? (
+          <Empty message="No timeline events yet." />
+        ) : (
+          <div style={pageStyles.timeline}>
+            {events.map((event) => (
+              <div key={event.event_id} style={pageStyles.eventRow}>
+                <div style={pageStyles.eventTime}>{event.timestamp}</div>
+                <div style={pageStyles.eventBody}>
+                  <strong>{event.subsystem}</strong> — {event.event_type}
+                  <br />
+                  {event.description}
+                  <span style={pageStyles.severity}>[{event.severity}]</span>
                 </div>
-              )}
-              {investigation.run_timestamps.completed_at && (
-                <div>
-                  <dt>Completed at</dt>
-                  <dd>{investigation.run_timestamps.completed_at}</dd>
-                </div>
-              )}
-            </dl>
-          </div>
-
-          {/* Observations */}
-          <div className="workspace-subpanel">
-            <h3 className="panel__title">Observations</h3>
-            <ul className="observations-list">
-              {investigation.observations.map((obs) => (
-                <li key={obs.observation_id} className="observation-item">
-                  <div className="observation-info">
-                    <strong>{obs.observation_type}</strong> in {obs.subsystem}
-                    <span className="observation-severity status-dot status-dot--{obs.severity}"></span>
+                {event.metadata && Object.keys(event.metadata).length > 0 && (
+                  <div style={pageStyles.meta}>
+                    {JSON.stringify(event.metadata)}
                   </div>
-                  <div className="observation-desc">
-                    {obs.description}
-                  </div>
-                  <div className="observation-meta">
-                    <span>
-                      Value: {obs.observed_value}{obs.threshold ? ` (threshold: ${obs.threshold} V)` : ""}</span>
-                    <span>Sources: {obs.source_ids.length}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {investigation.observations.length === 0 && (
-              <p className="empty-observations">No observations yet.</p>
-            )}
-          </div>
-
-          {/* Graph */}
-          <div className="workspace-subpanel">
-            <h3 className="panel__title">Graph</h3>
-            <div className="graph-summary">
-              <p>Nodes: {investigation.graph.nodes.length}</p>
-              <p>Edges: {investigation.graph.edges.length}</p>
-              <details className="graph-details">
-                <summary>Show node details</summary>
-                <ul>
-                  {investigation.graph.nodes.map((node) => (
-                    <li key={node.node_id}>
-                      {node.label} ({node.node_type}){node.timestamp && ` @ ${node.timestamp}`}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <details className="graph-details">
-                <summary>Show edge details</summary>
-                <ul>
-                  {investigation.graph.edges.map((edge) => (
-                    <li key={edge.edge_id}>
-                      {edge.source} → {edge.target}
-                      <span className="edge-confidence">confidence: {edge.confidence}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </div>
-          </div>
-        </section>
-
-        {/* RIGHT COLUMN: New telemetry & timeline components */}
-        <section className="workspace-panel" style={{ width: "48%" }}>
-
-          {/* Telemetry Chart */}
-          <div className="workspace-subpanel">
-            <h3 className="panel__title">Telemetry</h3>
-            <p className="subpanel-hint">
-              Multiple subsystem parameters with nominal ranges and thresholds
-            </p>
-            {telemetryData.length > 0 ? (
-              <TelemetryChart
-                data={telemetryData}
-                subsystems={subsystems}
-                missionStartUtc={missionStartUtc}
-                observations={investigation.observations}
-                selectedRange={selectedRange ? [new Date(selectedRange[0]), new Date(selectedRange[1])] : undefined}
-                onRangeChange={(range: [string, string]) => {
-                  setSelectedRange(range);
-                }}
-                onObservationClick={(obs) => {
-                  setHighlightedObservation(obs);
-                  setShowObservationDetail(true);
-                }}
-              />
-            ) : (
-              <TelemetryEmptyState />
-            )}
-            {error && <TelemetryErrorState error={error} />}
-          </div>
-
-          {/* Event Timeline */}
-          <div className="workspace-subpanel">
-            <h3 className="panel__title">Mission Events</h3>
-            <p className="subpanel-hint">
-              Chronological event log with severity distinction
-            </p>
-            {timelineEvents.length > 0 ? (
-              <EventTimeline
-                events={timelineEvents}
-                observations={investigation.observations}
-                selectedRange={selectedRange ? [new Date(selectedRange[0]), new Date(selectedRange[1])] : undefined}
-                onEventClick={(event, observation) => {
-                  // Handle event click - highlight observation if available
-                  if (observation) {
-                    setHighlightedObservation(observation);
-                    setShowObservationDetail(true);
-                  }
-                }}
-                missionStartUtc={missionStartUtc}
-              />
-            ) : (
-              <EventTimelineEmpty />
-            )}
-          </div>
-
-          {/* Observation Detail */}
-          <div className="workspace-subpanel">
-            <h3 className="panel__title">Observations Detail</h3>
-            {highlightedObservation ? (
-              <div>
-                <p><strong>ID:</strong> {highlightedObservation.observation_id}</p>
-                <p><strong>Timestamp:</strong> {highlightedObservation.timestamp}</p>
-                <p><strong>Subsystem:</strong> {highlightedObservation.subsystem}</p>
-                <p><strong>Type:</strong> {highlightedObservation.observation_type}</p>
-                <p><strong>Description:</strong> {highlightedObservation.description}</p>
-                <p><strong>Observed Value:</strong> {highlightedObservation.observed_value}{highlightedObservation.threshold ? ` (threshold: ${highlightedObservation.threshold} V)` : ""}</p>
-                <p><strong>Severity:</strong> {highlightedObservation.severity}</p>
-                <p><strong>Sources:</strong> {highlightedObservation.source_ids?.join(", ") || "—"}</p>
-                <button className="button button--small button--link" onClick={() => setShowObservationDetail(false)}>
-                  Close
-                </button>
+                )}
               </div>
-            ) : (
-              <p>Select an observation marker or event to view details.</p>
-            )}
+            ))}
           </div>
-        </section>
-
+        )}
       </div>
 
-      <section className="workspace-footer">
-        <p>
-          <strong>Report:</strong> {investigation.investigation_report || "Not yet generated"}
-        </p>
-        <p>
-          <strong>Evaluation metrics:</strong> root cause accuracy{" "}
-          {investigation.evaluation_metrics?.root_cause_accuracy?.toFixed(2) || "N/A"}
-        </p>
-      </section>
-    </section>
+      <div style={pageStyles.actions}>
+        <Link to={`/hypotheses?inv=${investigation.id}`}>View hypotheses</Link>
+        &nbsp;|&nbsp;
+        <Link to="/causal-graph">Causal graph</Link>
+        &nbsp;|&nbsp;
+        <Link to="/evaluation">Evaluation</Link>
+      </div>
+    </div>
   );
 }
+
+const pageStyles: Record<string, React.CSSProperties> = {
+  container: { padding: 24, color: "var(--text)", fontFamily: "system-ui, sans-serif" },
+  breadcrumbs: { marginBottom: 10, fontFamily: "var(--mono)", fontSize: 0.8, color: "var(--faint)" },
+  headerCard: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    padding: 16,
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    background: "var(--surface)",
+    marginBottom: 20,
+  },
+  title: { margin: "0 0 6px", fontSize: 1.3 },
+  sub: { margin: 0, color: "var(--muted)", fontSize: 0.85 },
+  statusBadge: { display: "flex", alignItems: "center", gap: 8 },
+  statusDot: { width: 8, height: 8, borderRadius: "50%" },
+  statusText: { fontFamily: "var(--mono)", fontSize: 0.85, fontWeight: 600 },
+  progressText: { marginLeft: 10, fontFamily: "var(--mono)", fontSize: 0.8, color: "var(--muted)" },
+  section: { marginTop: 20 },
+  sectionTitle: { margin: "0 0 10px", fontSize: 1, color: "var(--muted)", fontFamily: "var(--mono)" },
+  timeline: { display: "flex", flexDirection: "column", gap: 8 },
+  eventRow: {
+    display: "flex",
+    gap: 10,
+    padding: 10,
+    border: "1px solid var(--border)",
+    borderRadius: 6,
+    background: "rgba(14, 20, 30, 0.4)",
+  },
+  eventTime: {
+    minWidth: 150,
+    fontFamily: "var(--mono)",
+    fontSize: 0.8,
+    color: "var(--faint)",
+  },
+  eventBody: { flex: 1, fontSize: 0.9 },
+  severity: {
+    marginLeft: 8,
+    fontFamily: "var(--mono)",
+    fontSize: 0.75,
+    padding: "1px 6px",
+    border: "1px solid var(--border)",
+    borderRadius: 4,
+    color: "var(--faint)",
+  },
+  meta: { marginTop: 6, fontFamily: "var(--mono)", fontSize: 0.75, color: "var(--faint)" },
+  actions: { marginTop: 20, fontFamily: "var(--mono)", fontSize: 0.85, color: "var(--muted)" },
+};
