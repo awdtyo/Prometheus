@@ -8,6 +8,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from autopsy.agents.orchestrator import generate_hypotheses
 from autopsy.analysis.scoring import score_hypotheses
 from autopsy.graph.builder import build_graph
@@ -16,6 +18,8 @@ from autopsy.llm.client import LLMClient
 from autopsy.observations.extractor import extract_observations
 from autopsy.schemas.enums import RunStatus
 from autopsy.schemas.results import RunResult, RunTimestamps
+
+load_dotenv()
 
 
 class PipelineError(Exception):

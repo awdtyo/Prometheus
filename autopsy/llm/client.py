@@ -191,7 +191,7 @@ class LLMCounters:
         self.cache_hits += 1
 
 
-def _build_openai_client(api_key: str, base_url: str):
+def _build_openai_client(api_key: str, base_url: str) -> Any:
     """Build an OpenAI client that works with httpx>=0.28.
 
     openai<1.6x passes a ``proxies`` kwarg to ``httpx.Client``; httpx>=0.28
