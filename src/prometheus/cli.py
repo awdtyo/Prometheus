@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 
 from prometheus import __version__
 from prometheus.config import ConfigError, get_settings
+from prometheus.contracts import SUBSYSTEMS
+from prometheus.ingest import IngestError, ingest_run
 from prometheus.llm.client import LLMClient, LLMError
 from prometheus.sim import (
     ScenarioError,
@@ -96,6 +98,57 @@ def llm_ping(
 
     typer.echo(json.dumps({"model": target_model, **answer.model_dump()}))
     typer.echo(f"usage: {client.stats.summary()}")
+
+
+@app.command("ingest")
+def ingest(
+    run_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="Mission directory containing specs.yaml and the telemetry CSVs.",
+    ),
+) -> None:
+    """Normalize one mission and print a summary plus its data-quality report."""
+    try:
+        result = ingest_run(run_dir)
+    except IngestError as exc:
+        typer.secho(f"ingest failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    spec = result.spec
+    typer.echo(f"run: {result.run_dir}")
+    typer.echo(f"scenario: {spec.scenario}  seed: {spec.seed}")
+    typer.echo(
+        f"time: {result.timeline[0].isoformat()} -> {result.timeline[-1].isoformat()}"
+    )
+    typer.echo(
+        f"duration: {spec.duration_s:.0f}s  timestamps: {len(result.timeline)} (union)"
+    )
+    typer.echo(
+        f"channels: {len(result.series)}  dependencies: {len(spec.dependencies)}  "
+        f"events: {len(result.events)}"
+    )
+    typer.echo("")
+    typer.echo(
+        f"{'subsystem':<9} {'file':<24} {'rows':>5} {'channels':>8} {'interval':>8}"
+    )
+    for subsystem in SUBSYSTEMS:
+        layout = spec.subsystems[subsystem]
+        typer.echo(
+            f"{subsystem.value:<9} {layout.file:<24} "
+            f"{result.rows_by_subsystem[subsystem]:>5} {len(layout.channels):>8} "
+            f"{layout.sample_interval_s:>7.0f}s"
+        )
+
+    aligned = result.aligned()
+    typer.echo("")
+    typer.echo(
+        f"aligned view: {aligned.frame.shape[0]} x {aligned.frame.shape[1]} "
+        "(union timeline, ffill within 1.0x native interval; see observed mask)"
+    )
+    typer.echo("")
+    typer.echo(result.quality.render())
 
 
 @sim_app.command("generate")
