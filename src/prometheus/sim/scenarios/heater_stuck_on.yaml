@@ -1,0 +1,119 @@
+name: heater_stuck_on
+title: Battery heater stuck on overheats the pack and strains the power budget
+description: >
+  A heater switch welds closed, so the battery heater runs at full power. The
+  battery node warms, capacity derates, the bus load rises and voltage sags,
+  the avionics bay warms, and the transmitter is finally power-limited.
+duration_s: 21600
+time_origin_utc: "2026-03-14T00:00:00+00:00"
+fault:
+  type: heater_stuck_on
+  start_s: 3600
+  ramp_s: 180
+  end_s: 21600
+  params:
+    payload_heat_k: 1.0
+    extra_bus_current_a: 3.0
+    soc_loss_pct: 8.0
+    snr_cut_db: 0.6
+    downlink_cut_frac: 0.08
+chain:
+  - order: 1
+    subsystem: thermal
+    channel: heater_power_w
+    direction: up
+    onset_offset_s: 0
+    ramp_s: 180
+    expected_delta: 85.0
+    mechanism: heater switch welds closed and runs at full power
+  - order: 2
+    subsystem: thermal
+    channel: battery_temp_k
+    direction: up
+    onset_offset_s: 300
+    ramp_s: 600
+    expected_delta: 8.0
+    mechanism: continuous heater power warms the battery node
+  - order: 3
+    subsystem: power
+    channel: load_power_w
+    direction: up
+    onset_offset_s: 600
+    ramp_s: 240
+    expected_delta: 85.0
+    mechanism: heater load enters the bus power budget
+  - order: 4
+    subsystem: power
+    channel: bus_voltage_v
+    direction: down
+    onset_offset_s: 900
+    ramp_s: 300
+    expected_delta: -0.7
+    mechanism: higher bus current increases distribution losses
+  - order: 5
+    subsystem: thermal
+    channel: avionics_temp_k
+    direction: up
+    onset_offset_s: 1200
+    ramp_s: 600
+    expected_delta: 3.0
+    mechanism: heater heat leaks into the avionics bay
+  - order: 6
+    subsystem: comms
+    channel: tx_power_dbw
+    direction: down
+    onset_offset_s: 1500
+    ramp_s: 240
+    expected_delta: -0.8
+    mechanism: transmitter output is trimmed as the bus margin shrinks
+distractor:
+  type: attitude_slew
+  start_s: 1800
+  duration_s: 240
+  subsystem: adcs
+  channel: attitude_error_deg
+  magnitude: 0.35
+  description: commanded slew for a star-tracker calibration
+events:
+  - at_s: 0
+    kind: command
+    subsystem: adcs
+    severity: info
+    code: CMD_MODE_SCIENCE
+    message: science pointing mode commanded
+  - at_s: 1200
+    kind: command
+    subsystem: thermal
+    severity: info
+    code: CMD_HEATER_AUTO
+    message: battery heater set to automatic control
+  - at_s: 1860
+    kind: alarm
+    subsystem: adcs
+    severity: info
+    code: ALARM_SLEW_CALIBRATION
+    message: attitude slew for star-tracker calibration
+  - at_s: 3660
+    kind: alarm
+    subsystem: thermal
+    severity: warning
+    code: ALARM_HEATER_OVERCURRENT
+    message: heater current above command
+  - at_s: 3960
+    kind: alarm
+    subsystem: thermal
+    severity: warning
+    code: ALARM_BATTERY_TEMP_HIGH
+    message: battery node above 292 K
+  - at_s: 4260
+    kind: alarm
+    subsystem: power
+    severity: warning
+    code: ALARM_BUS_LOAD_HIGH
+    message: bus load above nominal envelope
+  - at_s: 5160
+    kind: alarm
+    subsystem: comms
+    severity: warning
+    code: ALARM_TX_POWER_REDUCED
+    message: transmitter output trimmed to protect bus margin

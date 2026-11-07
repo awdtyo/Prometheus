@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 data/cache/
 data/generated/
+data/ground_truth/
 *.egg-info/
 build/
 dist/

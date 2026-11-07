@@ -1,0 +1,124 @@
+name: reaction_wheel_friction
+title: Reaction-wheel bearing friction loads the bus and degrades pointing
+description: >
+  Rising bearing friction makes the reaction wheel draw more current, loading the
+  bus and sagging its voltage. The wheel bearing heats up, pointing error grows,
+  antenna gain falls with the pointing loss, and the avionics bay warms.
+duration_s: 21600
+time_origin_utc: "2026-03-14T00:00:00+00:00"
+fault:
+  type: reaction_wheel_friction
+  start_s: 7200
+  ramp_s: 300
+  end_s: 21600
+  params:
+    voltage_drop_v: 0.45
+    snr_cut_db: 2.2
+    speed_loss_rpm: 25.0
+    payload_heat_k: 0.8
+chain:
+  - order: 1
+    subsystem: adcs
+    channel: wheel_current_a
+    direction: up
+    onset_offset_s: 0
+    ramp_s: 300
+    expected_delta: 0.8
+    mechanism: bearing friction increases wheel drive current
+  - order: 2
+    subsystem: power
+    channel: bus_current_a
+    direction: up
+    onset_offset_s: 300
+    ramp_s: 200
+    expected_delta: 0.8
+    mechanism: extra wheel current is drawn from the bus
+  - order: 3
+    subsystem: adcs
+    channel: wheel_temp_c
+    direction: up
+    onset_offset_s: 900
+    ramp_s: 600
+    expected_delta: 15.0
+    mechanism: friction dissipates heat in the bearing
+  - order: 4
+    subsystem: adcs
+    channel: attitude_error_deg
+    direction: up
+    onset_offset_s: 1200
+    ramp_s: 300
+    expected_delta: 0.8
+    mechanism: friction torque disturbs pointing control
+  - order: 5
+    subsystem: comms
+    channel: snr_db
+    direction: down
+    onset_offset_s: 1500
+    ramp_s: 240
+    expected_delta: -2.2
+    mechanism: pointing loss reduces antenna gain
+  - order: 6
+    subsystem: thermal
+    channel: avionics_temp_k
+    direction: up
+    onset_offset_s: 1800
+    ramp_s: 600
+    expected_delta: 2.5
+    mechanism: wheel heat conducts into the avionics bay
+distractor:
+  type: payload_current_spike
+  start_s: 2400
+  duration_s: 180
+  subsystem: power
+  channel: load_power_w
+  magnitude: 35.0
+  description: short payload inrush transient during a science sequence
+events:
+  - at_s: 0
+    kind: command
+    subsystem: adcs
+    severity: info
+    code: CMD_MODE_SCIENCE
+    message: science pointing mode commanded
+  - at_s: 900
+    kind: command
+    subsystem: power
+    severity: info
+    code: CMD_PAYLOAD_ON
+    message: payload science sequence started
+  - at_s: 2460
+    kind: alarm
+    subsystem: power
+    severity: info
+    code: ALARM_PAYLOAD_INRUSH
+    message: payload inrush current transient
+  - at_s: 7260
+    kind: alarm
+    subsystem: adcs
+    severity: warning
+    code: ALARM_WHEEL_CURRENT_HIGH
+    message: reaction-wheel current above 1.4 A
+  - at_s: 8160
+    kind: alarm
+    subsystem: adcs
+    severity: critical
+    code: ALARM_WHEEL_OVERTEMP
+    message: wheel bearing above 45 C
+  - at_s: 8460
+    kind: alarm
+    subsystem: adcs
+    severity: critical
+    code: ALARM_ATTITUDE_ERROR
+    message: pointing error above 0.5 deg
+  - at_s: 8760
+    kind: alarm
+    subsystem: comms
+    severity: warning
+    code: ALARM_SNR_DEGRADED
+    message: downlink SNR degraded by pointing loss
+  - at_s: 9060
+    kind: alarm
+    subsystem: thermal
+    severity: warning
+    code: ALARM_AVIONICS_TEMP_HIGH
+    message: avionics bay above 296 K

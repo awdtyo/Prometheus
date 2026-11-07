@@ -1,0 +1,126 @@
+name: battery_voltage_drop
+title: Battery cell degradation causes a bus undervoltage cascade
+description: >
+  Progressive cell degradation raises the battery's internal resistance, sagging
+  the main bus. Undervoltage protection sheds loads, the transmitter is capped,
+  heaters lose power, the battery node cools, and reduced wheel torque authority
+  grows the pointing error.
+duration_s: 21600
+time_origin_utc: "2026-03-14T00:00:00+00:00"
+fault:
+  type: battery_voltage_drop
+  start_s: 5400
+  ramp_s: 300
+  end_s: 21600
+  params:
+    snr_cut_db: 2.4
+    downlink_cut_frac: 0.35
+    load_shed_current_a: 2.2
+    soc_loss_pct: 6.0
+    wheel_current_loss_a: 0.25
+chain:
+  - order: 1
+    subsystem: power
+    channel: bus_voltage_v
+    direction: down
+    onset_offset_s: 0
+    ramp_s: 300
+    expected_delta: -3.2
+    mechanism: cell degradation raises internal resistance and sags the bus
+  - order: 2
+    subsystem: power
+    channel: load_power_w
+    direction: down
+    onset_offset_s: 300
+    ramp_s: 120
+    expected_delta: -70.0
+    mechanism: undervoltage protection sheds non-essential loads
+  - order: 3
+    subsystem: comms
+    channel: tx_power_dbw
+    direction: down
+    onset_offset_s: 600
+    ramp_s: 180
+    expected_delta: -2.6
+    mechanism: transmitter output is capped by the sagging bus
+  - order: 4
+    subsystem: thermal
+    channel: heater_power_w
+    direction: down
+    onset_offset_s: 1200
+    ramp_s: 300
+    expected_delta: -22.0
+    mechanism: heater duty is cut to protect the power budget
+  - order: 5
+    subsystem: thermal
+    channel: battery_temp_k
+    direction: down
+    onset_offset_s: 1500
+    ramp_s: 600
+    expected_delta: -4.5
+    mechanism: reduced heater power cools the battery node
+  - order: 6
+    subsystem: adcs
+    channel: attitude_error_deg
+    direction: up
+    onset_offset_s: 1800
+    ramp_s: 300
+    expected_delta: 1.0
+    mechanism: reduced bus voltage lowers wheel torque authority
+distractor:
+  type: comms_snr_dip
+  start_s: 1500
+  duration_s: 240
+  subsystem: comms
+  channel: snr_db
+  magnitude: -3.0
+  description: brief signal fade during a ground-station handover
+events:
+  - at_s: 0
+    kind: command
+    subsystem: adcs
+    severity: info
+    code: CMD_MODE_SCIENCE
+    message: science pointing mode commanded
+  - at_s: 600
+    kind: command
+    subsystem: comms
+    severity: info
+    code: CMD_XBAND_ON
+    message: X-band transmitter enabled
+  - at_s: 1500
+    kind: alarm
+    subsystem: comms
+    severity: info
+    code: ALARM_SNR_DIP
+    message: SNR dip during ground-station handover
+  - at_s: 5520
+    kind: alarm
+    subsystem: power
+    severity: critical
+    code: ALARM_BUS_UNDERVOLTAGE
+    message: bus voltage below 26.5 V
+  - at_s: 5720
+    kind: alarm
+    subsystem: power
+    severity: warning
+    code: ALARM_LOAD_SHED
+    message: non-essential loads shed
+  - at_s: 6020
+    kind: alarm
+    subsystem: comms
+    severity: warning
+    code: ALARM_TX_POWER_LIMIT
+    message: transmitter power capped by bus voltage
+  - at_s: 6620
+    kind: alarm
+    subsystem: thermal
+    severity: warning
+    code: ALARM_BATTERY_TEMP_LOW
+    message: battery node below 282 K
+  - at_s: 7220
+    kind: alarm
+    subsystem: adcs
+    severity: critical
+    code: ALARM_ATTITUDE_ERROR
+    message: pointing error above 0.5 deg
