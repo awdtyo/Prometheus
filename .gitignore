@@ -4,3 +4,10 @@ PROGRESS.md
 .venv/
 __pycache__/
 *.pyc
+data/cache/
+data/generated/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
