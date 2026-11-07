@@ -1,0 +1,6 @@
+AGENTS.md
+PROGRESS.md
+.env
+.venv/
+__pycache__/
+*.pyc
