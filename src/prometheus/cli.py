@@ -1,7 +1,7 @@
 """Command-line interface.
 
-Phase 0 exposes ``llm-ping``; Phase 1 adds ``sim generate``. Later phases add
-pipeline commands here.
+Phase 0 exposes ``llm-ping``; Phase 1 adds ``sim generate``; Phase 2 adds
+``ingest``; Phase 3 adds ``observe``. Later phases add pipeline commands here.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from prometheus.config import ConfigError, get_settings
 from prometheus.contracts import SUBSYSTEMS
 from prometheus.ingest import IngestError, ingest_run
 from prometheus.llm.client import LLMClient, LLMError
+from prometheus.observations import ObservationResult, observe_run
 from prometheus.sim import (
     ScenarioError,
     available_scenarios,
@@ -149,6 +150,77 @@ def ingest(
     )
     typer.echo("")
     typer.echo(result.quality.render())
+
+
+@app.command("observe")
+def observe(
+    run_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="Mission directory containing specs.yaml and the telemetry CSVs.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Output JSON path (default: <run_dir>/observations.json).",
+    ),
+) -> None:
+    """Extract discrete observations and write ``observations.json``."""
+    try:
+        result = observe_run(run_dir, out_path=out)
+    except (IngestError, ValueError) as exc:
+        typer.secho(f"observe failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_observation_summary(result)
+
+
+def _print_observation_summary(result: ObservationResult) -> None:
+    """Print counts and a compact observation table."""
+    origin = result.ingested.timeline[0]
+    by_kind = result.counts_by_kind()
+    by_source = result.counts_by_source()
+    typer.echo(f"run: {result.ingested.run_dir}")
+    typer.echo(
+        f"scenario: {result.observations.scenario}  seed: {result.observations.seed}"
+    )
+    typer.echo(
+        f"observations: {len(result.observations.observations)} "
+        f"(telemetry {by_source.get('telemetry', 0)}, events {by_source.get('event', 0)})"
+    )
+    typer.echo(
+        "by kind: "
+        + "  ".join(f"{kind}={count}" for kind, count in by_kind.items())
+    )
+    typer.echo("")
+    header = (
+        f"{'id':<9} {'start':>9} {'end':>9} {'subsystem':<9} {'channel':<30} "
+        f"{'kind':<8} {'magnitude':>12} {'severity':<8} {'conf':>4} {'source':<9}"
+    )
+    typer.echo(header)
+    for observation in result.observations.observations:
+        start = (observation.t_start - origin).total_seconds()
+        end = (observation.t_end - origin).total_seconds()
+        channel = observation.channel or "-"
+        typer.echo(
+            f"{observation.id:<9} {_offset(start):>9} {_offset(end):>9} "
+            f"{observation.subsystem.value:<9} {channel:<30} "
+            f"{observation.kind.value:<8} {observation.magnitude:>12.4g} "
+            f"{observation.severity.value:<8} {observation.confidence:>4.2f} "
+            f"{observation.source.value:<9}"
+        )
+    typer.echo("")
+    typer.echo(f"wrote: {result.output_path}")
+
+
+def _offset(seconds: float) -> str:
+    """Format a mission-relative offset as ``+HH:MM:SS``."""
+    sign = "+" if seconds >= 0 else "-"
+    total = int(round(abs(seconds)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{sign}{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 @sim_app.command("generate")

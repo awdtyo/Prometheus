@@ -135,3 +135,84 @@ class Spec(BaseModel):
     def channel_names(self) -> list[str]:
         """Canonical channel names, in subsystem order."""
         return [channel.name for channel in self.channels]
+
+
+class ObservationKind(StrEnum):
+    """What a discrete observation represents."""
+
+    STEP = "step"
+    DRIFT = "drift"
+    SPIKE = "spike"
+    VARIANCE = "variance"
+    EVENT = "event"
+
+
+class ObservationSource(StrEnum):
+    """Where the observation came from."""
+
+    TELEMETRY = "telemetry"
+    EVENT = "event"
+
+
+class Severity(StrEnum):
+    """Operator-facing severity, shared by telemetry and log observations."""
+
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class Observation(BaseModel):
+    """A discrete, citable fact extracted from one mission.
+
+    Telemetry observations cite a canonical channel and a time interval;
+    event observations cite the command/alarm log and have no channel. The
+    ``id`` is assigned deterministically after detection, so identical inputs
+    always produce identical identifiers.
+    """
+
+    id: str = Field(pattern=r"^OBS-\d{4,}$")
+    subsystem: Subsystem
+    channel: str | None = None
+    t_start: datetime
+    t_end: datetime
+    kind: ObservationKind
+    magnitude: float
+    severity: Severity
+    confidence: float = Field(ge=0.0, le=1.0)
+    source: ObservationSource
+    detail: str = ""
+
+    @model_validator(mode="after")
+    def _check(self) -> Observation:
+        if self.t_end < self.t_start:
+            raise ValueError(f"{self.id}: t_end precedes t_start")
+        if self.t_start.tzinfo is None or self.t_end.tzinfo is None:
+            raise ValueError(f"{self.id}: timestamps must be timezone-aware")
+        if self.source is ObservationSource.TELEMETRY:
+            if self.kind is ObservationKind.EVENT:
+                raise ValueError(f"{self.id}: telemetry observation cannot be an event")
+            if not self.channel:
+                raise ValueError(f"{self.id}: telemetry observation needs a channel")
+        else:
+            if self.kind is not ObservationKind.EVENT:
+                raise ValueError(f"{self.id}: event source must have kind 'event'")
+            if self.channel is not None:
+                raise ValueError(f"{self.id}: event observation cannot have a channel")
+        return self
+
+
+class ObservationSet(BaseModel):
+    """The observations extracted from one mission run."""
+
+    scenario: str
+    seed: int | None = None
+    mission: str = ""
+    observations: list[Observation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> ObservationSet:
+        identifiers = [observation.id for observation in self.observations]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("observation ids must be unique")
+        return self
