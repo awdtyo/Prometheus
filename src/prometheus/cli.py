@@ -1,7 +1,8 @@
 """Command-line interface.
 
 Phase 0 exposes ``llm-ping``; Phase 1 adds ``sim generate``; Phase 2 adds
-``ingest``; Phase 3 adds ``observe``. Later phases add pipeline commands here.
+``ingest``; Phase 3 adds ``observe``; Phase 4 adds ``graph``. Later phases add
+pipeline commands here.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 from prometheus import __version__
 from prometheus.config import ConfigError, get_settings
 from prometheus.contracts import SUBSYSTEMS
+from prometheus.graph import GraphResult, build_graph_run
 from prometheus.ingest import IngestError, ingest_run
 from prometheus.llm.client import LLMClient, LLMError
 from prometheus.observations import ObservationResult, observe_run
@@ -221,6 +223,74 @@ def _offset(seconds: float) -> str:
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{sign}{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+@app.command("graph")
+def graph_command(
+    run_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="Mission directory containing specs.yaml and the telemetry CSVs.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Output JSON path (default: <run_dir>/graph.json).",
+    ),
+    html: Path | None = typer.Option(
+        None,
+        "--html",
+        help="Output HTML path (default: <run_dir>/graph.html).",
+    ),
+) -> None:
+    """Build the temporal causal graph and write JSON plus static HTML."""
+    try:
+        result = build_graph_run(
+            run_dir,
+            json_path=out,
+            html_path=html,
+        )
+    except (IngestError, ValueError) as exc:
+        typer.secho(f"graph failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_graph_summary(result)
+
+
+def _print_graph_summary(result: GraphResult) -> None:
+    """Print graph counts and the strongest edges."""
+    by_id = {node.id: node for node in result.document.nodes}
+    typer.echo(f"run: {result.ingested.run_dir}")
+    typer.echo(
+        f"scenario: {result.document.scenario}  seed: {result.document.seed}"
+    )
+    typer.echo(
+        f"nodes: {len(result.document.nodes)}  edges: {len(result.document.edges)} "
+        f"(spec {result.spec_edges}, data {result.data_edges})"
+    )
+    typer.echo("")
+    header = (
+        f"{'edge':<9} {'source':<30} {'target':<30} {'spec':<5} "
+        f"{'lag':>7} {'r':>7} {'p':>7} {'score':>6}"
+    )
+    typer.echo(header)
+    for edge in sorted(
+        result.document.edges, key=lambda item: (-item.edge_score, item.id)
+    ):
+        source = by_id[edge.source]
+        target = by_id[edge.target]
+        source_name = source.channel or f"event {source.id}"
+        target_name = target.channel or f"event {target.id}"
+        typer.echo(
+            f"{edge.id:<9} {source_name:<30} {target_name:<30} "
+            f"{'yes' if edge.spec_support else 'no':<5} "
+            f"{edge.onset_lag_s:>7.0f} {edge.correlation:>7.2f} "
+            f"{edge.p_value:>7.3f} {edge.edge_score:>6.2f}"
+        )
+    typer.echo("")
+    typer.echo(f"wrote: {result.json_path}")
+    typer.echo(f"wrote: {result.html_path}")
 
 
 @sim_app.command("generate")

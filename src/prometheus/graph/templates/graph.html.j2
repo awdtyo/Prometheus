@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5d6a80;
+      --line: #d7dee9;
+      --panel: #f6f8fb;
+      --spec: #2f6fdd;
+      --data: #d97706;
+    }
+    body {
+      margin: 0;
+      padding: 28px;
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #fff;
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    h2 { margin: 28px 0 10px; font-size: 16px; }
+    .meta { color: var(--muted); margin-bottom: 18px; }
+    .stats { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 8px; }
+    .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+    .stat b { display: block; font-size: 18px; }
+    .legend { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); margin: 10px 0; }
+    .swatch { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 6px; border-top: 3px solid var(--spec); }
+    .swatch.data { border-top-style: dashed; border-color: var(--data); }
+    .swatch.event { width: 10px; height: 10px; border: 0; background: #fff; outline: 2px solid var(--muted); transform: rotate(45deg); }
+    .canvas { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+    svg { display: block; min-width: 1120px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; background: var(--panel); position: sticky; top: 0; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    code { font-size: 12px; }
+    .small { color: var(--muted); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>{{ scenario }} — temporal causal graph</h1>
+  <div class="meta">mission: {{ mission }} · seed: {{ seed }} · evidence window: onset-aligned residuals on a {{ grid_s }} s grid</div>
+
+  <div class="stats">
+    <div class="stat"><b>{{ node_count }}</b>nodes</div>
+    <div class="stat"><b>{{ edge_count }}</b>edges</div>
+    <div class="stat"><b>{{ spec_count }}</b>spec-supported</div>
+    <div class="stat"><b>{{ data_count }}</b>data-only</div>
+  </div>
+
+  <div class="legend">
+    <span><span class="swatch"></span>spec-supported edge</span>
+    <span><span class="swatch data"></span>data-only edge</span>
+    <span><span class="swatch event"></span>event observation</span>
+    <span>line width and opacity increase with edge score</span>
+  </div>
+
+  <div class="canvas">
+    {{ svg|safe }}
+  </div>
+
+  <h2>Edges by score</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>edge</th>
+        <th>source</th>
+        <th>target</th>
+        <th>spec</th>
+        <th class="num">onset lag (s)</th>
+        <th class="num">xcorr lag (s)</th>
+        <th class="num">r</th>
+        <th class="num">p</th>
+        <th class="num">support</th>
+        <th class="num">score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><code>{{ row.id }}</code></td>
+        <td><code>{{ row.source_label }}</code></td>
+        <td><code>{{ row.target_label }}</code></td>
+        <td>{{ row.spec }}</td>
+        <td class="num">{{ row.onset_lag }}</td>
+        <td class="num">{{ row.xcorr_lag }}</td>
+        <td class="num">{{ row.correlation }}</td>
+        <td class="num">{{ row.p_value }}</td>
+        <td class="num">{{ row.support }}</td>
+        <td class="num">{{ row.score }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="small">Scores are computed from residuals and the permutation test; the graph contains candidates for the hypothesis agents, not proven causes.</p>
+</body>
+</html>

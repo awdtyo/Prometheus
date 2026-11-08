@@ -2,7 +2,8 @@
 
 Every structure that crosses a pipeline stage boundary is a pydantic model
 defined here. Phase 0 defined :class:`Subsystem`; Phase 2 adds the spec models
-(:class:`Channel`, :class:`SubsystemSpec`, :class:`Dependency`, :class:`Spec`).
+(:class:`Channel`, :class:`SubsystemSpec`, :class:`Dependency`, :class:`Spec`);
+Phase 3 adds observations; Phase 4 adds graph edges and the graph document.
 """
 
 from __future__ import annotations
@@ -215,4 +216,72 @@ class ObservationSet(BaseModel):
         identifiers = [observation.id for observation in self.observations]
         if len(set(identifiers)) != len(identifiers):
             raise ValueError("observation ids must be unique")
+        return self
+
+
+class GraphEdge(BaseModel):
+    """One directed candidate causal link between two observations.
+
+    Timing is stored three ways so later stages can audit it: ``onset_lag_s``
+    is the difference of observation onsets, ``xcorr_lag_s`` is the
+    event-aligned cross-correlation peak, and ``lag_estimate_s`` combines them.
+    The range brackets both estimates. ``statistical_support`` and
+    ``edge_score`` are computed in code, never set by an LLM.
+    """
+
+    id: str = Field(pattern=r"^EDGE-\d{4,}$")
+    source: str
+    target: str
+    spec_support: bool
+    mechanism: str = ""
+    onset_lag_s: float
+    xcorr_lag_s: float | None = None
+    lag_estimate_s: float
+    lag_min_s: float = Field(ge=0.0)
+    lag_max_s: float = Field(ge=0.0)
+    correlation: float = Field(ge=-1.0, le=1.0)
+    p_value: float = Field(ge=0.0, le=1.0)
+    statistical_support: float = Field(ge=0.0, le=1.0)
+    lag_agreement: float = Field(ge=0.0, le=1.0)
+    confidence_factor: float = Field(default=1.0, ge=0.0, le=1.0)
+    edge_score: float = Field(ge=0.0, le=1.0)
+    provenance: str = ""
+
+    @model_validator(mode="after")
+    def _check(self) -> GraphEdge:
+        if self.source == self.target:
+            raise ValueError(f"{self.id}: self edge")
+        if self.lag_max_s < self.lag_min_s:
+            raise ValueError(f"{self.id}: lag range is inverted")
+        return self
+
+
+class GraphDocument(BaseModel):
+    """Serializable temporal causal graph for one mission.
+
+    Nodes are :class:`Observation` models and edges carry their own stable
+    identifiers. A validator enforces the ordering rule on the serialized form,
+    so a hand-edited or corrupt JSON file cannot introduce a backward edge.
+    """
+
+    scenario: str
+    seed: int | None = None
+    mission: str = ""
+    nodes: list[Observation] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> GraphDocument:
+        node_ids = [node.id for node in self.nodes]
+        if len(set(node_ids)) != len(node_ids):
+            raise ValueError("graph node ids must be unique")
+        by_id = {node.id: node for node in self.nodes}
+        edge_ids = [edge.id for edge in self.edges]
+        if len(set(edge_ids)) != len(edge_ids):
+            raise ValueError("graph edge ids must be unique")
+        for edge in self.edges:
+            if edge.source not in by_id or edge.target not in by_id:
+                raise ValueError(f"{edge.id}: endpoint does not exist")
+            if by_id[edge.target].t_start <= by_id[edge.source].t_start:
+                raise ValueError(f"{edge.id}: edge violates temporal ordering")
         return self
