@@ -15,6 +15,7 @@ import typer
 from pydantic import BaseModel, Field
 
 from prometheus import __version__
+from prometheus.agents import InvestigationResult, investigate_run
 from prometheus.config import ConfigError, get_settings
 from prometheus.contracts import SUBSYSTEMS
 from prometheus.graph import GraphResult, build_graph_run
@@ -291,6 +292,120 @@ def _print_graph_summary(result: GraphResult) -> None:
     typer.echo("")
     typer.echo(f"wrote: {result.json_path}")
     typer.echo(f"wrote: {result.html_path}")
+
+
+@app.command("investigate")
+def investigate_command(
+    run_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="Mission directory containing specs.yaml and the telemetry CSVs.",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Output JSON path (default: <run_dir>/hypotheses.json).",
+    ),
+    no_graph: bool = typer.Option(
+        False,
+        "--no-graph",
+        help="Ablation: agents see observations only (no graph edges).",
+    ),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", help="Bypass the on-disk response cache."
+    ),
+) -> None:
+    """Run Proposer, Prosecutor, Skeptic and Judge; write ``hypotheses.json``."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    settings = get_settings()
+    if not settings.groq_api_key:
+        typer.secho(
+            "GROQ_API_KEY is not set. Copy .env.example to .env and add your key.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    client = LLMClient(settings=settings, cache_enabled=not no_cache)
+    try:
+        result = investigate_run(
+            run_dir,
+            use_graph=not no_graph,
+            client=client,
+            output_path=out,
+        )
+    except (IngestError, ValueError, ConfigError, LLMError) as exc:
+        typer.secho(f"investigate failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    _print_investigation_summary(result)
+
+
+def _print_investigation_summary(result: InvestigationResult) -> None:
+    """Print the ranked hypotheses, their scores and the run's token usage."""
+    document = result.document
+    typer.echo(f"run: {result.ingested.run_dir}")
+    typer.echo(f"scenario: {document.scenario}  seed: {document.seed}")
+    typer.echo(
+        f"mode: {'graph' if document.use_graph else 'observations-only'}  "
+        f"nodes: {document.graph_nodes}  edges: {document.graph_edges}"
+    )
+    typer.echo(f"hypotheses: {len(document.hypotheses)}  dropped: {len(document.dropped)}")
+    typer.echo("")
+    typer.echo(
+        f"{'rank':<5} {'id':<10} {'root_cause':<28} {'total':>6} {'margin':>7} "
+        f"{'temporal':>9} {'spec':>6} {'stat':>6} {'cover':>6} {'penalty':>8}"
+    )
+    for ranked in document.hypotheses:
+        score = ranked.score
+        typer.echo(
+            f"{ranked.rank:<5} {ranked.hypothesis.id:<10} "
+            f"{ranked.hypothesis.root_cause.value:<28} {score.total:>6.3f} "
+            f"{ranked.margin_to_next:>7.3f} {score.temporal_consistency:>9.3f} "
+            f"{score.spec_consistency:>6.3f} {score.statistical_support:>6.3f} "
+            f"{score.observation_coverage:>6.3f} "
+            f"{score.contradiction_penalty:>8.3f}"
+        )
+
+    top = result.top
+    if top is not None:
+        by_id = {observation.id: observation for observation in result.observations.observations}
+        typer.echo("")
+        typer.echo(f"top chain ({top.hypothesis.root_cause.value}):")
+        for observation_id in top.hypothesis.chain:
+            observation = by_id[observation_id]
+            name = observation.channel or observation.detail or observation.id
+            offset = _offset(
+                (observation.t_start - result.ingested.timeline[0]).total_seconds()
+            )
+            typer.echo(
+                f"  {observation_id}  {offset:>9}  "
+                f"{observation.subsystem.value:<8} {name}"
+            )
+        if top.hypothesis.edges:
+            typer.echo("edges: " + ", ".join(top.hypothesis.edges))
+        typer.echo(f"rationale: {top.judge_rationale}")
+
+    if document.dropped:
+        typer.echo("")
+        typer.echo("dropped proposals:")
+        for dropped in document.dropped:
+            label = dropped.root_cause.value if dropped.root_cause else "unknown"
+            typer.echo(f"  {label}: {'; '.join(dropped.reasons)}")
+
+    if document.warnings:
+        typer.echo("")
+        typer.echo("warnings:")
+        for warning in document.warnings:
+            typer.echo(f"  - {warning}")
+
+    typer.echo("")
+    for agent in document.agents:
+        typer.echo(f"{agent.agent:<11} {agent.usage.summary()}")
+    typer.echo(f"{'total':<11} {document.total_usage.summary()}")
+    typer.echo("")
+    typer.echo(f"wrote: {result.output_path}")
 
 
 @sim_app.command("generate")

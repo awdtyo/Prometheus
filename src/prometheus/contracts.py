@@ -3,11 +3,13 @@
 Every structure that crosses a pipeline stage boundary is a pydantic model
 defined here. Phase 0 defined :class:`Subsystem`; Phase 2 adds the spec models
 (:class:`Channel`, :class:`SubsystemSpec`, :class:`Dependency`, :class:`Spec`);
-Phase 3 adds observations; Phase 4 adds graph edges and the graph document.
+Phase 3 adds observations; Phase 4 adds graph edges and the graph document;
+Phase 5 adds the root-cause taxonomy and hypothesis-agent results.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 
@@ -284,4 +286,180 @@ class GraphDocument(BaseModel):
                 raise ValueError(f"{edge.id}: endpoint does not exist")
             if by_id[edge.target].t_start <= by_id[edge.source].t_start:
                 raise ValueError(f"{edge.id}: edge violates temporal ordering")
+        return self
+
+
+class RootCauseLabel(StrEnum):
+    """Fixed taxonomy the Proposer must choose from.
+
+    The labels are deliberately broader than the simulator's scenario names so
+    competing hypotheses can share a vocabulary while still naming a distinct
+    physical mechanism. ``UNKNOWN`` is the explicit escape hatch.
+    """
+
+    BATTERY_DEGRADATION = "battery_degradation"
+    POWER_DISTRIBUTION_FAULT = "power_distribution_fault"
+    LOAD_SHED = "load_shed"
+    HEATER_STUCK_ON = "heater_stuck_on"
+    THERMAL_CONTROL_FAILURE = "thermal_control_failure"
+    REACTION_WHEEL_FRICTION = "reaction_wheel_friction"
+    ATTITUDE_CONTROL_FAULT = "attitude_control_fault"
+    TRANSMITTER_FAULT = "transmitter_fault"
+    ANTENNA_POINTING_LOSS = "antenna_pointing_loss"
+    COMMS_HARDWARE_FAULT = "comms_hardware_fault"
+    SENSOR_FAULT = "sensor_fault"
+    UNKNOWN = "unknown"
+
+
+class Hypothesis(BaseModel):
+    """One validated root-cause explanation.
+
+    ``chain`` is ordered from the earliest cited observation to the latest and
+    contains only observation IDs that exist in the mission. ``edges`` cites
+    graph edges that connect observations in that chain. The citation validator
+    enforces existence before this model is built; the only structural rules
+    here are uniqueness and identifier format.
+    """
+
+    id: str = Field(pattern=r"^HYPO-\d{4,}$")
+    root_cause: RootCauseLabel
+    root_subsystem: Subsystem
+    summary: str = Field(min_length=1)
+    chain: list[str] = Field(min_length=1)
+    edges: list[str] = Field(default_factory=list)
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> Hypothesis:
+        if len(set(self.chain)) != len(self.chain):
+            raise ValueError(f"{self.id}: duplicate observation id in chain")
+        if len(set(self.edges)) != len(self.edges):
+            raise ValueError(f"{self.id}: duplicate edge id")
+        for observation_id in self.chain:
+            if re.fullmatch(r"OBS-\d{4,}", observation_id) is None:
+                raise ValueError(f"{self.id}: bad observation id {observation_id!r}")
+        for edge_id in self.edges:
+            if re.fullmatch(r"EDGE-\d{4,}", edge_id) is None:
+                raise ValueError(f"{self.id}: bad edge id {edge_id!r}")
+        return self
+
+
+class ProsecutorReport(BaseModel):
+    """Deterministically retrieved support for one hypothesis."""
+
+    observation_ids: list[str] = Field(default_factory=list)
+    edge_ids: list[str] = Field(default_factory=list)
+    mean_edge_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    summary: str = ""
+
+
+class ContradictionCode(StrEnum):
+    """Fixed codes for deterministic Skeptic checks."""
+
+    ORDERING = "ordering"
+    REVERSE_EDGE = "reverse_edge"
+    UNEXPLAINED_DOWNSTREAM = "unexplained_downstream"
+    UNEXPLAINED_HIGH_SEVERITY = "unexplained_high_severity"
+    MISSING_SPEC_EFFECT = "missing_spec_effect"
+    ROOT_MISMATCH = "root_mismatch"
+
+
+class Contradiction(BaseModel):
+    """One deterministic objection to a hypothesis."""
+
+    code: ContradictionCode
+    detail: str
+    observation_ids: list[str] = Field(default_factory=list)
+
+
+class SkepticReport(BaseModel):
+    """Deterministic contradictions plus LLM-authored alternatives."""
+
+    contradictions: list[Contradiction] = Field(default_factory=list)
+    alternatives: list[str] = Field(default_factory=list)
+    penalty: float = Field(default=0.0, ge=0.0, le=1.0)
+    summary: str = ""
+
+
+class HypothesisScore(BaseModel):
+    """Judge components. Every value is computed in code, never by the LLM."""
+
+    temporal_consistency: float = Field(ge=0.0, le=1.0)
+    spec_consistency: float = Field(ge=0.0, le=1.0)
+    statistical_support: float = Field(ge=0.0, le=1.0)
+    observation_coverage: float = Field(ge=0.0, le=1.0)
+    contradiction_penalty: float = Field(ge=0.0, le=1.0)
+    total: float = Field(ge=0.0, le=1.0)
+
+
+class RankedHypothesis(BaseModel):
+    """A hypothesis with its evidence, objections, score and rank."""
+
+    hypothesis: Hypothesis
+    score: HypothesisScore
+    prosecutor: ProsecutorReport
+    skeptic: SkepticReport
+    judge_rationale: str = ""
+    rank: int = Field(ge=1)
+    margin_to_next: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class DroppedHypothesis(BaseModel):
+    """A proposal rejected by the citation validator, kept for audit."""
+
+    root_cause: RootCauseLabel | None = None
+    summary: str = ""
+    reasons: list[str] = Field(default_factory=list)
+
+
+class LLMUsage(BaseModel):
+    """Token and call counters for one agent or the whole investigation."""
+
+    calls: int = 0
+    cache_hits: int = 0
+    retries: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    def summary(self) -> str:
+        """Return a compact one-line summary for CLI output and reports."""
+        return (
+            f"calls={self.calls} cache_hits={self.cache_hits} "
+            f"retries={self.retries} prompt_tokens={self.prompt_tokens} "
+            f"completion_tokens={self.completion_tokens} "
+            f"total_tokens={self.total_tokens}"
+        )
+
+
+class AgentUsage(BaseModel):
+    """Usage attributed to one named agent."""
+
+    agent: str
+    usage: LLMUsage = Field(default_factory=LLMUsage)
+
+
+class InvestigationDocument(BaseModel):
+    """Serialized output of the Phase 5 hypothesis pipeline."""
+
+    scenario: str
+    seed: int | None = None
+    mission: str = ""
+    use_graph: bool = True
+    graph_nodes: int = 0
+    graph_edges: int = 0
+    hypotheses: list[RankedHypothesis] = Field(default_factory=list)
+    dropped: list[DroppedHypothesis] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    agents: list[AgentUsage] = Field(default_factory=list)
+    total_usage: LLMUsage = Field(default_factory=LLMUsage)
+
+    @model_validator(mode="after")
+    def _check(self) -> InvestigationDocument:
+        identifiers = [item.hypothesis.id for item in self.hypotheses]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("hypothesis ids must be unique")
+        ranks = [item.rank for item in self.hypotheses]
+        if ranks != list(range(1, len(ranks) + 1)):
+            raise ValueError("hypotheses must be ranked contiguously from 1")
         return self
